@@ -1,62 +1,114 @@
 // /api/perplexity.js
-export default async function handler(req, res) {
-  // --- Allow CORS for GitHub Pages + localhost ---
-  res.setHeader("Access-Control-Allow-Origin", "https://ready4exam.github.io");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  if (req.method === "OPTIONS") return res.status(200).end();
 
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method Not Allowed" });
+export const config = {
+  runtime: "edge", // fast, lightweight
+};
+
+export default async function handler(req) {
+  // --- CORS setup ---
+  const allowedOrigins = [
+    "https://ready4exam.github.io",
+    "http://localhost:5500",
+    "http://127.0.0.1:5500",
+  ];
+  const origin = req.headers.get("origin");
+  const corsHeaders = {
+    "Access-Control-Allow-Origin": allowedOrigins.includes(origin)
+      ? origin
+      : "https://ready4exam.github.io",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  };
+
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 200, headers: corsHeaders });
   }
 
-  try {
-    const { prompt } = req.body || {};
-    if (!prompt || typeof prompt !== "string") {
-      return res.status(400).json({ error: "Missing or invalid prompt" });
-    }
+  if (req.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
 
-    // --- Call Perplexity API ---
+  // --- Parse body safely ---
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+      status: 400,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  const { prompt } = body || {};
+  if (!prompt || typeof prompt !== "string") {
+    return new Response(JSON.stringify({ error: "Missing or invalid 'prompt'" }), {
+      status: 400,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  // --- Ensure key exists ---
+  const apiKey = process.env.PERPLEXITY_API_KEY;
+  if (!apiKey) {
+    console.error("❌ Missing PERPLEXITY_API_KEY in environment");
+    return new Response(JSON.stringify({ error: "Server misconfiguration" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  // --- Call Perplexity API ---
+  try {
     const perplexityRes = await fetch("https://api.perplexity.ai/chat/completions", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${process.env.PERPLEXITY_API_KEY}`,
+        "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
         model: "llama-3.1-sonar-small-128k-online",
         messages: [
-          { role: "system", content: "You are a helpful assistant for educational data extraction. Return structured JSON or plain text." },
+          {
+            role: "system",
+            content: "You are an educational assistant. Return JSON arrays or plain lists only.",
+          },
           { role: "user", content: prompt },
         ],
       }),
     });
 
-    // --- Handle HTTP or JSON parsing errors safely ---
-    let data = null;
+    const text = await perplexityRes.text();
+    let data = {};
     try {
-      data = await perplexityRes.json();
+      data = JSON.parse(text);
     } catch {
-      return res.status(500).json({ error: "Perplexity returned invalid JSON" });
-    }
-
-    if (!perplexityRes.ok) {
-      console.error("❌ Perplexity API error:", data);
-      return res.status(500).json({
-        error: "Perplexity API call failed",
+      console.error("⚠️ Non-JSON Perplexity response:", text);
+      return new Response(JSON.stringify({ raw: text }), {
         status: perplexityRes.status,
-        details: data,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    console.log("✅ Success:", data);
-    return res.status(200).json(data);
+    if (!perplexityRes.ok) {
+      console.error("❌ Perplexity API Error:", data);
+      return new Response(JSON.stringify({ error: "Perplexity API failed", data }), {
+        status: perplexityRes.status,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    return new Response(JSON.stringify(data), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   } catch (err) {
-    console.error("🔥 Server error:", err);
-    return res.status(500).json({
-      error: "Server error",
-      message: err.message,
-      stack: err.stack,
+    console.error("🔥 Unexpected error:", err);
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 }
