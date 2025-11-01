@@ -1,118 +1,171 @@
-// File: /api/perplexity.js
+import { supabase } from './supabaseClient.js';
 
-export const config = {
-  runtime: "edge", // lightweight & fast execution
+const classSelect = document.getElementById('classSelect');
+const subjectSelect = document.getElementById('subjectSelect');
+const chapterSelect = document.getElementById('chapterSelect');
+const generateBtn = document.getElementById('generateBtn');
+const logEl = document.getElementById('log');
+
+const log = (msg) => {
+  console.log(msg);
+  logEl.textContent += msg + "\n";
+  logEl.scrollTop = logEl.scrollHeight;
 };
 
-export default async function handler(req) {
-  const allowedOrigins = [
-    "https://ready4exam.github.io",
-    "http://localhost:5500",
-    "http://127.0.0.1:5500",
-  ];
-  const origin = req.headers.get("origin");
-  const corsHeaders = {
-    "Access-Control-Allow-Origin": allowedOrigins.includes(origin)
-      ? origin
-      : "https://ready4exam.github.io",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-  };
+async function askPerplexity(prompt) {
+  log("🧠 Asking Perplexity (sonar-pro)...");
+  const res = await fetch("https://tableautomation.vercel.app/api/perplexity", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt })
+  });
+  if (!res.ok) throw new Error(`Perplexity request failed (${res.status})`);
+  return res.json();
+}
 
-  // --- Handle CORS preflight ---
-  if (req.method === "OPTIONS") {
-    return new Response(null, { status: 200, headers: corsHeaders });
-  }
+classSelect.addEventListener('change', async () => {
+  const selectedClass = classSelect.value;
+  if (!selectedClass) return;
+  subjectSelect.innerHTML = "";
+  chapterSelect.innerHTML = "";
+  generateBtn.disabled = true;
 
-  // --- Reject invalid methods ---
-  if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Only POST allowed" }), {
-      status: 405,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-
-  // --- Parse request safely ---
-  let body;
+  log(`🔍 Fetching NCERT subjects for Class ${selectedClass}...`);
+  const prompt = `List all NCERT subjects for Class ${selectedClass} in JSON array format. Example: ["Science","Mathematics","Social Science","English"]`;
   try {
-    body = await req.json();
-  } catch {
-    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    const data = await askPerplexity(prompt);
+    const text = data?.choices?.[0]?.message?.content || "[]";
+    const subjects = JSON.parse(text.replace(/```json|```/g, '').trim());
+    subjectSelect.innerHTML = '<option value="">-- Select Subject --</option>';
+    subjects.forEach(s => {
+      subjectSelect.innerHTML += `<option value="${s}">${s}</option>`;
     });
-  }
-
-  const { prompt } = body || {};
-  if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
-    return new Response(JSON.stringify({ error: "Missing or invalid 'prompt'" }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-
-  // --- Ensure API key exists ---
-  const apiKey = process.env.PERPLEXITY_API_KEY;
-  if (!apiKey) {
-    console.error("❌ Missing PERPLEXITY_API_KEY in environment variables");
-    return new Response(JSON.stringify({ error: "Server misconfiguration" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
-
-  // --- Build the Perplexity API payload ---
-  const payload = {
-    model: "sonar-pro", // 🔥 using the requested PRO model
-    messages: [
-      {
-        role: "system",
-        content:
-          "You are an education data assistant. Return clean, structured JSON or lists — no markdown or extra text.",
-      },
-      { role: "user", content: prompt.trim() },
-    ],
-  };
-
-  try {
-    console.log("🧠 Sending request to Perplexity (sonar-pro)...");
-
-    const response = await fetch("https://api.perplexity.ai/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const text = await response.text();
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      console.warn("⚠️ Non-JSON response from Perplexity:", text);
-      data = { raw: text };
-    }
-
-    if (!response.ok) {
-      console.error("❌ Perplexity API Error:", data);
-      return new Response(JSON.stringify({ error: "Perplexity API failed", data }), {
-        status: response.status,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    console.log("✅ Success:", response.status);
-    return new Response(JSON.stringify(data), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    subjectSelect.disabled = false;
+    log(`✅ Found ${subjects.length} subjects.`);
   } catch (err) {
-    console.error("🔥 Internal error:", err);
-    return new Response(JSON.stringify({ error: err.message }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    log(`❌ Failed to fetch subjects: ${err.message}`);
   }
+});
+
+subjectSelect.addEventListener('change', async () => {
+  const selectedClass = classSelect.value;
+  const subject = subjectSelect.value;
+  if (!subject) return;
+  chapterSelect.innerHTML = "";
+  generateBtn.disabled = true;
+
+  log(`📖 Fetching chapters for ${subject} (Class ${selectedClass})...`);
+  const prompt = `List all NCERT chapters for Class ${selectedClass}, Subject ${subject} as a JSON array of chapter names only.`;
+  try {
+    const data = await askPerplexity(prompt);
+    const text = data?.choices?.[0]?.message?.content || "[]";
+    const chapters = JSON.parse(text.replace(/```json|```/g, '').trim());
+    chapterSelect.innerHTML = '<option value="">-- Select Chapter --</option>';
+    chapters.forEach(ch => {
+      chapterSelect.innerHTML += `<option value="${ch}">${ch}</option>`;
+    });
+    chapterSelect.disabled = false;
+    log(`✅ Found ${chapters.length} chapters.`);
+  } catch (err) {
+    log(`❌ Failed to fetch chapters: ${err.message}`);
+  }
+});
+
+generateBtn.addEventListener('click', async () => {
+  const chapter = chapterSelect.value;
+  const subject = subjectSelect.value;
+  const selectedClass = classSelect.value;
+  if (!chapter) return alert("Please select a chapter first.");
+
+  const tableName = chapter.toLowerCase().replace(/\s+/g, '_');
+  log(`🧾 Checking or creating table: ${tableName}`);
+
+  const columns = [
+    'difficulty', 'question_type', 'question_text',
+    'scenario_reason_text', 'option_a', 'option_b', 'option_c',
+    'option_d', 'correct_answer_key'
+  ];
+
+  const sql = `
+    CREATE TABLE IF NOT EXISTS ${tableName} (
+      id SERIAL PRIMARY KEY,
+      ${columns.map(c => `${c} TEXT`).join(', ')},
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    -- Enable Row Level Security
+    ALTER TABLE ${tableName} ENABLE ROW LEVEL SECURITY;
+
+    -- Policy 1: Enable insert for authenticated and anon users
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = '${tableName}' AND policyname = 'Enable insert for authenticated users') THEN
+        CREATE POLICY "Enable insert for authenticated users" ON ${tableName}
+        FOR INSERT
+        TO anon, authenticated
+        USING (true)
+        WITH CHECK (true);
+      END IF;
+    END$$;
+
+    -- Policy 2: Enable read access for all users
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = '${tableName}' AND policyname = 'Enable read access for all users') THEN
+        CREATE POLICY "Enable read access for all users" ON ${tableName}
+        FOR SELECT
+        TO public
+        USING (true);
+      END IF;
+    END$$;
+  `;
+
+  const { error: createError } = await supabase.rpc('execute_sql', { query: sql });
+  if (createError) {
+    log(`⚠️ Table creation or RLS setup failed: ${createError.message}`);
+    return;
+  }
+
+  log(`✅ Table ${tableName} ready with RLS and policies.`);
+
+  // Generate 60 questions
+  log(`📚 Generating 60 questions for ${subject} → ${chapter}...`);
+  const prompt = `
+Generate exactly 60 unique quiz questions for Class ${selectedClass}, Subject ${subject}, Chapter ${chapter}.
+Return ONLY a valid CSV with these headers:
+difficulty,question_type,question_text,scenario_reason_text,option_a,option_b,option_c,option_d,correct_answer_key
+Distribution:
+- Simple: 20 (10 MCQ, 5 AR, 5 Case-Based)
+- Medium: 20 (10 MCQ, 5 AR, 5 Case-Based)
+- Advanced: 20 (10 MCQ, 5 AR, 5 Case-Based)
+`;
+
+  try {
+    const data = await askPerplexity(prompt);
+    const csv = data?.choices?.[0]?.message?.content || "";
+    log("✅ CSV received. Parsing...");
+    const rows = parseCSV(csv);
+    log(`📤 Uploading ${rows.length} rows to Supabase...`);
+
+    const { error: insertError } = await supabase.from(tableName).insert(rows);
+    if (insertError) throw insertError;
+    log(`🎉 Successfully inserted ${rows.length} questions into ${tableName}.`);
+  } catch (err) {
+    log(`❌ Error: ${err.message}`);
+  }
+});
+
+chapterSelect.addEventListener('change', () => {
+  generateBtn.disabled = !chapterSelect.value;
+});
+
+function parseCSV(csv) {
+  const lines = csv.trim().split('\n');
+  const headers = lines[0].split(',').map(h => h.trim());
+  return lines.slice(1).map(line => {
+    const values = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+    const row = {};
+    headers.forEach((h, i) => row[h] = values[i]);
+    return row;
+  });
 }
