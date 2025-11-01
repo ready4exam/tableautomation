@@ -18,7 +18,7 @@ export default async function handler(req, res) {
 
     // ✅ Safe, clean request payload
     const perplexityReq = {
-      model: "sonar-medium-online",
+      model: "sonar-pro",
       messages: [
         {
           role: "system",
