@@ -3,178 +3,41 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Ready4Exam Table Automation</title>
-  <script type="module" src="./supabaseClient.js"></script>
-  <style>
-    body {
-      font-family: 'Segoe UI', Tahoma, sans-serif;
-      background: #f9fafb;
-      margin: 0;
-      padding: 0;
-    }
-    header {
-      background: #1e293b;
-      color: white;
-      padding: 1rem 2rem;
-    }
-    main {
-      padding: 2rem;
-      max-width: 800px;
-      margin: auto;
-    }
-    select, button {
-      padding: 10px;
-      font-size: 16px;
-      margin: 10px 0;
-      border-radius: 8px;
-      border: 1px solid #ccc;
-      width: 100%;
-    }
-    .log {
-      background: #f1f5f9;
-      border-radius: 10px;
-      padding: 15px;
-      font-size: 14px;
-      max-height: 400px;
-      overflow-y: auto;
-      margin-top: 1rem;
-      white-space: pre-wrap;
-    }
-  </style>
+  <title>Ready4Exam - Table Automation</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" />
 </head>
+<body class="bg-gray-50 text-gray-900">
+  <div class="max-w-2xl mx-auto p-6">
+    <h1 class="text-2xl font-bold mb-4">Ready4Exam - NCERT Automation (Gemini)</h1>
 
-<body>
-  <header>
-    <h2>📘 Ready4Exam Table Automation</h2>
-  </header>
+    <div class="space-y-3">
+      <select id="classSelect" class="border p-2 rounded w-full">
+        <option value="">-- Select Class --</option>
+        <option value="6">Class 6</option>
+        <option value="7">Class 7</option>
+        <option value="8">Class 8</option>
+        <option value="9">Class 9</option>
+        <option value="10">Class 10</option>
+        <option value="11">Class 11</option>
+        <option value="12">Class 12</option>
+      </select>
 
-  <main>
-    <label for="classSelect">Select Class:</label>
-    <select id="classSelect">
-      <option value="">-- Select Class --</option>
-      <option>6</option>
-      <option>7</option>
-      <option>8</option>
-      <option>9</option>
-      <option>10</option>
-    </select>
+      <select id="subjectSelect" class="border p-2 rounded w-full" disabled>
+        <option value="">-- Select Subject --</option>
+      </select>
 
-    <div class="log" id="log"></div>
-  </main>
+      <select id="chapterSelect" class="border p-2 rounded w-full" disabled>
+        <option value="">-- Select Chapter --</option>
+      </select>
 
-  <script type="module">
-    import { supabase } from "./supabaseClient.js";
+      <button id="generateBtn" class="bg-blue-600 text-white px-4 py-2 rounded disabled:bg-gray-400" disabled>
+        🚀 Generate Questions
+      </button>
 
-    const logBox = document.getElementById("log");
-    const classSelect = document.getElementById("classSelect");
+      <pre id="log" class="bg-black text-green-300 p-3 rounded h-72 overflow-y-auto text-sm"></pre>
+    </div>
+  </div>
 
-    const log = (msg) => {
-      console.log(msg);
-      logBox.textContent += msg + "\n";
-      logBox.scrollTop = logBox.scrollHeight;
-    };
-
-    classSelect.addEventListener("change", async (e) => {
-      const selectedClass = e.target.value;
-      if (!selectedClass) return;
-
-      log(`🔍 Fetching NCERT subjects for Class ${selectedClass}...`);
-
-      const subjects = await askPerplexity(
-        `List all NCERT subjects for Class ${selectedClass} in JSON array format, e.g. ["Science","Mathematics","Social Science","English"].`
-      );
-      if (!Array.isArray(subjects)) {
-        log(`❌ Invalid subject response: ${JSON.stringify(subjects)}`);
-        return;
-      }
-      log(`✅ Loaded ${subjects.length} subjects.`);
-
-      for (const subject of subjects) {
-        log(`🔍 Fetching NCERT chapters for ${subject} (Class ${selectedClass})...`);
-        const chapters = await askPerplexity(
-          `List all NCERT chapter names for Class ${selectedClass} ${subject} as a clean JSON array.`
-        );
-
-        if (!Array.isArray(chapters)) {
-          log(`⚠️ Skipping invalid chapter response for ${subject}.`);
-          continue;
-        }
-        log(`✅ Loaded ${chapters.length} chapters.`);
-
-        for (const chapter of chapters) {
-          const tableName = chapter
-            .toLowerCase()
-            .replace(/[^a-z0-9_]+/g, "_")
-            .replace(/^_+|_+$/g, "");
-
-          log(`🚀 Generating quiz questions for "${chapter}"...`);
-
-          const questions = await askPerplexity(
-            `Generate 5 NCERT-style MCQ questions for Class ${selectedClass} ${subject}, Chapter "${chapter}". 
-             Each should include: difficulty, question_type, question_text, scenario_reason_text (if any), options A-D, and correct_answer_key. 
-             Return pure JSON array of objects.`
-          );
-
-          if (!Array.isArray(questions)) {
-            log(`⚠️ Invalid question format for ${chapter}. Skipping.`);
-            continue;
-          }
-
-          // Ensure table exists
-          const { error: tableErr } = await supabase.rpc("create_table_if_not_exists", {
-            table_name: tableName,
-          });
-          if (tableErr) {
-            log(`❌ Table creation failed for ${tableName}: ${tableErr.message}`);
-            continue;
-          }
-
-          log(`📥 Inserting ${questions.length} questions into table "${tableName}"...`);
-          const { error: insertErr } = await supabase.from(tableName).insert(questions);
-
-          if (insertErr) {
-            log(`❌ Insert failed for ${tableName}: ${insertErr.message}`);
-          } else {
-            log(`✅ Inserted successfully into "${tableName}".`);
-          }
-        }
-      }
-
-      log(`🎉 All subjects processed for Class ${selectedClass}.`);
-    });
-
-    // -----------------
-    // Perplexity helper
-    // -----------------
-    async function askPerplexity(prompt) {
-      log("🧠 Asking Perplexity...");
-      try {
-        const res = await fetch("https://tableautomation.vercel.app/api/perplexity", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt }),
-        });
-
-        if (!res.ok) throw new Error(`Perplexity request failed (${res.status})`);
-
-        const data = await res.json();
-
-        // Try extracting model reply
-        const reply =
-          data?.choices?.[0]?.message?.content ||
-          data?.raw ||
-          JSON.stringify(data);
-
-        try {
-          return JSON.parse(reply);
-        } catch {
-          return reply;
-        }
-      } catch (err) {
-        log(`❌ Error: ${err.message}`);
-        return null;
-      }
-    }
-  </script>
+  <script type="module" src="./gemini_frontend.js"></script>
 </body>
 </html>
