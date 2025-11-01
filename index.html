@@ -68,16 +68,25 @@
     const chapterSelect = document.getElementById("chapterSelect");
 
     // 🧠 Ask Perplexity through Vercel proxy
-    async function askPerplexity(prompt) {
-      log(`🧠 Asking Perplexity...`);
-      const res = await fetch(PPLX_PROXY, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
-      });
-      if (!res.ok) throw new Error(`Perplexity request failed (${res.status})`);
-      return await res.text();
-    }
+  async function askPerplexity(prompt) {
+  console.log("🧠 Asking Perplexity...");
+
+  const response = await fetch("https://tableautomation.vercel.app/api/perplexity", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ prompt }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Perplexity request failed (${response.status})`);
+  }
+
+  const data = await response.json();
+  console.log("✅ Got response from Perplexity:", data);
+  return data;
+}
 
     classSelect.addEventListener("change", async () => {
       const cls = classSelect.value;
