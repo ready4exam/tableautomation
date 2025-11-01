@@ -145,7 +145,6 @@ generateBtn.addEventListener('click', async () => {
         ON public.${tableName}
         FOR INSERT
         TO anon, authenticated
-        USING (true)
         WITH CHECK (true);
       END IF;
     END $$;
