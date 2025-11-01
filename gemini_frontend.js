@@ -126,9 +126,18 @@ generateBtn.addEventListener('click', async () => {
   const chapter = chapterSelect.value;
   if (!chapter) return alert("Please select a chapter first.");
 
-  const tableName = (() => {
-  const words = chapter.toLowerCase().split(/\s+/).filter(Boolean);
-  return words.length > 1 ? `${words[0]}_${words[1]}` : words[0];
+// Generate safe table name from chapter
+const tableName = (() => {
+  let words = chapter
+    .toLowerCase()
+    .replace(/[:.,;'"!?()]/g, '') // remove punctuation like :
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (words.length === 1) {
+    return `${words[0]}_quiz`; // single word → add suffix
+  }
+  return `${words[0]}_${words[1]}`; // first two words
 })();
   log(`🧾 Preparing table: ${tableName}`);
 
