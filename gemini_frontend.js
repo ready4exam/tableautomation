@@ -116,7 +116,10 @@ generateBtn.addEventListener('click', async () => {
   const chapter = chapterSelect.value;
   if (!chapter) return alert("Please select a chapter first.");
 
-  const tableName = chapter.toLowerCase().replace(/\s+/g, '_');
+  const tableName = (() => {
+  const words = chapter.toLowerCase().split(/\s+/).filter(Boolean);
+  return words.length > 1 ? `${words[0]}_${words[1]}` : words[0];
+})();
   log(`🧾 Preparing table: ${tableName}`);
 
   const columns = [
@@ -185,9 +188,10 @@ Distribution:
 `;
 
   try {
-    const csvText = await askGemini(prompt);
-    log("✅ CSV received. Parsing...");
-    const rows = parseCSV(csvText);
+    let csvText = await askGemini(prompt);
+csvText = csvText.replace(/```csv|```/g, '').trim();
+log("✅ CSV received. Parsing...");
+const rows = parseCSV(csvText);
     log(`📤 Uploading ${rows.length} rows to Supabase...`);
 
     const { error: insertError } = await supabase.from(tableName).insert(rows);
