@@ -1,98 +1,170 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Ready4Exam Automation</title>
+  <meta charset="UTF-8">
+  <title>Ready4Exam — Automated NCERT Quiz Generator</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 700px; margin: auto; padding: 2rem; }
-    select, button, textarea { width: 100%; margin: 1rem 0; padding: 0.6rem; font-size: 1rem; }
-    pre { background: #f4f4f4; padding: 1rem; border-radius: 8px; height: 200px; overflow: auto; }
+    body {
+      font-family: system-ui, sans-serif;
+      background: #f8fafc;
+      color: #111;
+      max-width: 700px;
+      margin: 2rem auto;
+      padding: 1.5rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+    }
+    select, button, textarea {
+      width: 100%;
+      margin: 0.7rem 0;
+      padding: 0.6rem;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      font-size: 1rem;
+    }
+    button {
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      cursor: pointer;
+    }
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    pre {
+      background: #f1f5f9;
+      padding: 1rem;
+      border-radius: 8px;
+      height: 250px;
+      overflow: auto;
+      white-space: pre-wrap;
+      font-size: 0.9rem;
+    }
   </style>
 </head>
 <body>
 
-  <h2>📘 NCERT Quiz Generator (via Perplexity)</h2>
-  <label>Class:</label>
+  <h2>📘 Ready4Exam — NCERT Automation Tool</h2>
+  <p>Fetch syllabus dynamically from NCERT using Perplexity, auto-generate quizzes, and upload to Supabase.</p>
+
+  <label for="classSelect"><b>Class</b></label>
   <select id="classSelect">
     <option value="">Select Class</option>
-    <option>5</option><option>6</option><option>7</option><option>8</option>
-    <option>9</option><option>10</option><option>11</option><option>12</option>
+    <option>5</option><option>6</option><option>7</option>
+    <option>8</option><option>9</option><option>10</option>
+    <option>11</option><option>12</option>
   </select>
 
-  <label>Subject:</label>
-  <select id="subjectSelect" disabled><option value="">Select Subject</option></select>
+  <label for="subjectSelect"><b>Subject</b></label>
+  <select id="subjectSelect" disabled>
+    <option value="">Select Subject</option>
+  </select>
 
-  <label>Chapter:</label>
-  <select id="chapterSelect" disabled><option value="">Select Chapter</option></select>
+  <label for="chapterSelect"><b>Chapter</b></label>
+  <select id="chapterSelect" disabled>
+    <option value="">Select Chapter</option>
+  </select>
 
-  <button id="generateBtn" disabled>🚀 Generate Quiz & Upload</button>
+  <button id="generateBtn" disabled>🚀 Generate 60-Question Quiz & Upload</button>
 
-  <h3>Logs:</h3>
+  <h3>📜 Progress Log</h3>
   <pre id="log"></pre>
 
   <script>
-    // --- Supabase Setup ---
+    // --- 🧠 Supabase Setup ---
     const SUPABASE_URL = "https://gkyvojcmqsgdynmitcuf.supabase.co";
     const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdreXZvamNtcXNnZHlubWl0Y3VmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA3NDQ0OTcsImV4cCI6MjA3NjMyMDQ5N30.5dn5HbXxQ5sYNECS9o3VxVeyL6I6Z2Yf-nmPwztx1hE";
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-    const logEl = document.getElementById('log');
-    const log = (msg) => logEl.textContent += msg + "\n";
+    // --- 🔑 Perplexity API Key (Replace this) ---
+    const perplexityKey = "YOUR_PERPLEXITY_API_KEY";
 
-    const perplexityKey = "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"; // 🔑 Add your API key here
-    const baseUrl = "https://api.perplexity.ai/chat/completions";
+    // --- 🧾 UI Elements ---
+    const classSel = document.getElementById("classSelect");
+    const subjectSel = document.getElementById("subjectSelect");
+    const chapterSel = document.getElementById("chapterSelect");
+    const generateBtn = document.getElementById("generateBtn");
+    const logEl = document.getElementById("log");
 
+    const log = (msg) => {
+      logEl.textContent += msg + "\n";
+      logEl.scrollTop = logEl.scrollHeight;
+      console.log(msg);
+    };
+
+    // --- 💬 Perplexity API Call ---
     async function fetchPerplexity(prompt) {
-      const res = await fetch(baseUrl, {
+      log(`➡️ Sending request to Perplexity...`);
+      const response = await fetch("https://api.perplexity.ai/chat/completions", {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${perplexityKey}`,
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          model: "llama-3.1-sonar-large-128k-online",
-          messages: [{ role: "user", content: prompt }]
+          model: "sonar-small-online",
+          messages: [
+            { role: "system", content: "You are a helpful assistant that responds ONLY in valid JSON or CSV as instructed." },
+            { role: "user", content: prompt }
+          ]
         })
       });
-      const data = await res.json();
-      return data.choices?.[0]?.message?.content || "";
+
+      if (!response.ok) {
+        const text = await response.text();
+        log(`❌ Perplexity API Error ${response.status}: ${text}`);
+        throw new Error(text);
+      }
+
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content || "";
+      log(`✅ Perplexity response received.`);
+      return content.trim();
     }
 
-    const classSel = document.getElementById("classSelect");
-    const subjectSel = document.getElementById("subjectSelect");
-    const chapterSel = document.getElementById("chapterSelect");
-    const generateBtn = document.getElementById("generateBtn");
-
+    // --- Step 1: Fetch Subjects ---
     classSel.addEventListener("change", async () => {
       const cls = classSel.value;
       if (!cls) return;
       subjectSel.disabled = true;
       chapterSel.disabled = true;
-      log(`🔍 Fetching subjects for Class ${cls}...`);
-      const response = await fetchPerplexity(`List all NCERT subjects taught in Class ${cls}. Respond in JSON format as {"subjects": ["Science", "Maths", ...]}`);
+      subjectSel.innerHTML = "<option>Loading subjects...</option>";
+      log(`🔍 Fetching NCERT subjects for Class ${cls}...`);
+
       try {
+        const response = await fetchPerplexity(
+          `List all NCERT subjects taught in Class ${cls}. Respond ONLY in JSON format as {"subjects": ["Science", "Mathematics", ...]}`
+        );
         const data = JSON.parse(response);
         subjectSel.innerHTML = "<option value=''>Select Subject</option>";
-        data.subjects.forEach(sub => {
+        data.subjects.forEach(s => {
           const opt = document.createElement("option");
-          opt.value = sub;
-          opt.textContent = sub;
+          opt.value = s;
+          opt.textContent = s;
           subjectSel.appendChild(opt);
         });
         subjectSel.disabled = false;
-      } catch {
-        log("❌ Failed to parse subjects.");
+        log(`✅ Found ${data.subjects.length} subjects for Class ${cls}.`);
+      } catch (err) {
+        log(`❌ Failed to fetch subjects: ${err.message}`);
       }
     });
 
+    // --- Step 2: Fetch Chapters ---
     subjectSel.addEventListener("change", async () => {
       const cls = classSel.value;
-      const subject = subjectSel.value;
+      const subj = subjectSel.value;
+      if (!subj) return;
       chapterSel.disabled = true;
-      log(`📚 Fetching chapters for ${subject} (Class ${cls})...`);
-      const response = await fetchPerplexity(`List all NCERT chapter titles for Class ${cls} ${subject}. Respond in JSON format as {"chapters": ["Chapter 1 - ...", ...]}`);
+      chapterSel.innerHTML = "<option>Loading chapters...</option>";
+      log(`📚 Fetching chapters for Class ${cls} ${subj}...`);
+
       try {
+        const response = await fetchPerplexity(
+          `List all official NCERT chapter titles for Class ${cls} ${subj}. Respond ONLY in JSON as {"chapters": ["Chapter 1 - ...", "Chapter 2 - ...", ...]}`
+        );
         const data = JSON.parse(response);
         chapterSel.innerHTML = "<option value=''>Select Chapter</option>";
         data.chapters.forEach(ch => {
@@ -102,50 +174,4 @@
           chapterSel.appendChild(opt);
         });
         chapterSel.disabled = false;
-      } catch {
-        log("❌ Failed to parse chapters.");
-      }
-    });
-
-    generateBtn.addEventListener("click", async () => {
-      const chapter = chapterSel.value;
-      if (!chapter) return;
-      const tableName = chapter.toLowerCase().replace(/\s+/g, '_').replace(/[^\w_]/g, '');
-      log(`🧾 Creating table "${tableName}" and generating quiz...`);
-      
-      const prompt = `
-Generate exactly 60 unique quiz questions from NCERT chapter "${chapter}".
-Follow this schema and output ONLY CSV:
-
-difficulty,question_type,question_text,scenario_reason_text,option_a,option_b,option_c,option_d,correct_answer_key
-
-Apply these distribution rules:
-Simple: 20 (10 MCQ, 5 AR, 5 Case-Based)
-Medium: 20 (10 MCQ, 5 AR, 5 Case-Based)
-Advanced: 20 (10 MCQ, 5 AR, 5 Case-Based)
-`;
-
-      const csv = await fetchPerplexity(prompt);
-      log("✅ CSV generated. Uploading to Supabase...");
-
-      const lines = csv.trim().split("\n");
-      const headers = lines[0].split(",");
-      const rows = lines.slice(1).map(line => {
-        const values = line.split(",");
-        const obj = {};
-        headers.forEach((h, i) => obj[h.trim()] = values[i]?.trim() || "");
-        return obj;
-      });
-
-      const { error } = await supabase.from(tableName).insert(rows);
-      if (error) {
-        log("❌ Supabase error: " + error.message);
-      } else {
-        log(`🎉 Table "${tableName}" created and populated with ${rows.length} rows.`);
-      }
-    });
-
-    chapterSel.addEventListener("change", () => generateBtn.disabled = !chapterSel.value);
-  </script>
-</body>
-</html>
+        log(`✅ ${data.chapters.length} chapters f
