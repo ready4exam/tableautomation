@@ -17,7 +17,7 @@ export default async function handler(req, res) {
         "Authorization": `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: "sonar-small-online",
+        model: "sonar-pro",
         messages: [{ role: "user", content: "Say OK in JSON: {\"ok\":\"yes\"}" }]
       }),
       // set a short timeout if your environment supports AbortController (optional)
