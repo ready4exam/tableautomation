@@ -67,7 +67,8 @@ classSelect.addEventListener('change', async () => {
 
   try {
     const text = await askGemini(prompt);
-    const subjects = JSON.parse(text.replace(/```json|```/g, '').trim());
+    const clean = text.replace(/```json|```/g, '').replace(/\n/g, '').trim();
+    const subjects = JSON.parse(clean.endsWith(']') ? clean : clean + ']');
     subjectSelect.innerHTML = '<option value="">-- Select Subject --</option>';
     subjects.forEach((s) => {
       subjectSelect.innerHTML += `<option value="${s}">${s}</option>`;
@@ -80,7 +81,6 @@ classSelect.addEventListener('change', async () => {
 });
 
 // ------------- Handle Subject Selection -------------
-// ------------- Handle Subject Selection (Fixed JSON Parsing) -------------
 subjectSelect.addEventListener('change', async () => {
   const selectedClass = classSelect.value;
   const subject = subjectSelect.value;
@@ -89,24 +89,16 @@ subjectSelect.addEventListener('change', async () => {
   generateBtn.disabled = true;
 
   log(`📖 Fetching chapters for ${subject} (Class ${selectedClass})...`);
-  const prompt = `List all NCERT chapters for Class ${selectedClass}, Subject ${subject} as a JSON array of chapter names only. Example: ["Chapter 1: ...", "Chapter 2: ..."]`;
+  const prompt = `List all NCERT chapters for Class ${selectedClass}, Subject ${subject} as a JSON array of chapter names only.`;
 
   try {
     const text = await askGemini(prompt);
-    let cleaned = text
-      .replace(/```json|```/g, '')
-      .replace(/^.*?\[/s, '[') // remove anything before first [
-      .replace(/\].*$/s, ']') // remove anything after last ]
-      .trim();
-
-    const chapters = JSON.parse(cleaned);
-    if (!Array.isArray(chapters) || chapters.length === 0) throw new Error("No chapters found");
-
+    const clean = text.replace(/```json|```/g, '').replace(/\n/g, '').trim();
+    const chapters = JSON.parse(clean.endsWith(']') ? clean : clean + ']');
     chapterSelect.innerHTML = '<option value="">-- Select Chapter --</option>';
     chapters.forEach((ch) => {
       chapterSelect.innerHTML += `<option value="${ch}">${ch}</option>`;
     });
-
     chapterSelect.disabled = false;
     log(`✅ Found ${chapters.length} chapters.`);
   } catch (err) {
@@ -126,19 +118,18 @@ generateBtn.addEventListener('click', async () => {
   const chapter = chapterSelect.value;
   if (!chapter) return alert("Please select a chapter first.");
 
-// Generate safe table name from chapter
-const tableName = (() => {
-  let words = chapter
-    .toLowerCase()
-    .replace(/[:.,;'"!?()]/g, '') // remove punctuation like :
-    .split(/\s+/)
-    .filter(Boolean);
+  // ✅ Fixed: Proper table name after colon/semicolon
+  const tableName = (() => {
+    let cleanChapter = chapter
+      .toLowerCase()
+      .replace(/[:;.,!?'"()]/g, '') // remove invalid chars
+      .replace(/\s+/g, ' ') // normalize spaces
+      .trim();
 
-  if (words.length === 1) {
-    return `${words[0]}_quiz`; // single word → add suffix
-  }
-  return `${words[0]}_${words[1]}`; // first two words
-})();
+    const words = cleanChapter.split(' ').filter(Boolean);
+    return words.length > 1 ? `${words[0]}_${words[1]}` : `${words[0]}_quiz`;
+  })();
+
   log(`🧾 Preparing table: ${tableName}`);
 
   const columns = [
@@ -147,7 +138,6 @@ const tableName = (() => {
     'option_d', 'correct_answer_key'
   ];
 
-  // ✅ Corrected SQL syntax for Supabase function
   const sql = `
     CREATE TABLE IF NOT EXISTS public.${tableName} (
       id SERIAL PRIMARY KEY,
@@ -207,10 +197,9 @@ Distribution:
 `;
 
   try {
-    let csvText = await askGemini(prompt);
-csvText = csvText.replace(/```csv|```/g, '').trim();
-log("✅ CSV received. Parsing...");
-const rows = parseCSV(csvText);
+    const csvText = await askGemini(prompt);
+    log("✅ CSV received. Parsing...");
+    const rows = parseCSV(csvText);
     log(`📤 Uploading ${rows.length} rows to Supabase...`);
 
     const { error: insertError } = await supabase.from(tableName).insert(rows);
