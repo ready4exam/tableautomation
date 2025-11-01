@@ -1,4 +1,14 @@
 export default async function handler(req, res) {
+  // ✅ Allow CORS from your GitHub Pages site
+  res.setHeader("Access-Control-Allow-Origin", "https://ready4exam.github.io");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
+  // Handle preflight request
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method Not Allowed" });
   }
@@ -22,7 +32,7 @@ export default async function handler(req, res) {
         messages: [
           {
             role: "system",
-            content: "You are a helpful assistant that returns only JSON or structured text output for educational queries.",
+            content: "You are a helpful assistant that returns structured educational data.",
           },
           {
             role: "user",
@@ -36,7 +46,7 @@ export default async function handler(req, res) {
 
     if (!perplexityRes.ok) {
       console.error("❌ Perplexity API error:", data);
-      return res.status(500).json({ error: "Perplexity API call failed", details: data });
+      return res.status(500).json({ error: "Perplexity API failed", details: data });
     }
 
     console.log("✅ Perplexity response:", data);
