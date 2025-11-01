@@ -1,20 +1,11 @@
-// File: gemini_test.js
-import dotenv from "dotenv";
-import fetch from "node-fetch";
+// /api/gemini_test.js
+export default async function handler(req, res) {
+  const apiKey = process.env.google_api;
 
-dotenv.config();
+  if (!apiKey) {
+    return res.status(500).json({ error: "❌ Missing Gemini API key" });
+  }
 
-const apiKey = process.env.google_api;
-
-if (!apiKey) {
-  console.error("❌ Missing google_api key in environment.");
-  process.exit(1);
-}
-
-const testPrompt = "List three subjects taught in NCERT Class 8.";
-
-(async () => {
-  console.log("🚀 Testing Gemini 2.5 Flash with your API key...");
   try {
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
@@ -25,25 +16,16 @@ const testPrompt = "List three subjects taught in NCERT Class 8.";
           contents: [
             {
               role: "user",
-              parts: [{ text: testPrompt }],
+              parts: [{ text: "Say 'Gemini 2.5 Flash test success'." }],
             },
           ],
         }),
       }
     );
 
-    console.log("HTTP status:", response.status);
-    const data = await response.json();
-
-    if (response.ok) {
-      const text =
-        data?.candidates?.[0]?.content?.parts?.[0]?.text ??
-        JSON.stringify(data, null, 2);
-      console.log("✅ Gemini response:\n", text);
-    } else {
-      console.error("❌ API error:", JSON.stringify(data, null, 2));
-    }
-  } catch (err) {
-    console.error("🔥 Connection error:", err);
+    const result = await response.json();
+    return res.status(200).json(result);
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
   }
-})();
+}
