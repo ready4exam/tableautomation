@@ -1,14 +1,18 @@
-// File: debug.js
-import dotenv from "dotenv";
-dotenv.config();
+// /api/gemini_debug.js
+export default async function handler(req, res) {
+  try {
+    const key = process.env.google_api;
 
-const apiKey = process.env.google_api;
-
-if (!apiKey) {
-  console.error("❌ No Google API key found in environment variables.");
-  process.exit(1);
+    res.status(200).json({
+      status: "ok",
+      keyFound: !!key,
+      keyPreview: key ? key.slice(0, 8) + "********" : null,
+      environment: process.env.VERCEL_ENV || "unknown",
+      message: key
+        ? "✅ Gemini API key loaded successfully."
+        : "❌ Missing Gemini API key.",
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 }
-
-console.log("✅ Google API key detected.");
-console.log("Key length:", apiKey.length);
-console.log("First 10 chars:", apiKey.slice(0, 10) + "**********");
