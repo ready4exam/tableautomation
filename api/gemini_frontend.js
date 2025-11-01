@@ -1,4 +1,3 @@
-// File: gemini_frontend.js
 import { supabase } from './supabaseClient.js';
 
 const classSelect = document.getElementById('classSelect');
@@ -14,16 +13,17 @@ const log = (msg) => {
 };
 
 async function askGemini(prompt) {
-  log("🤖 Asking Gemini 2.5 Flash...");
+  log("🧠 Asking Gemini 2.5 Flash...");
   const res = await fetch("https://tableautomation.vercel.app/api/gemini", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt })
+    body: JSON.stringify({ prompt }),
   });
   if (!res.ok) throw new Error(`Gemini request failed (${res.status})`);
   return res.json();
 }
 
+// Fetch subjects
 classSelect.addEventListener('change', async () => {
   const selectedClass = classSelect.value;
   if (!selectedClass) return;
@@ -32,14 +32,15 @@ classSelect.addEventListener('change', async () => {
   generateBtn.disabled = true;
 
   log(`🔍 Fetching NCERT subjects for Class ${selectedClass}...`);
-  const prompt = `List all NCERT subjects for Class ${selectedClass} in JSON array format. Example: ["Science","Mathematics","Social Science","English"]`;
-
+  const prompt = `List all NCERT subjects for Class ${selectedClass} as a JSON array of names only.`;
   try {
     const data = await askGemini(prompt);
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
     const subjects = JSON.parse(text.replace(/```json|```/g, '').trim());
     subjectSelect.innerHTML = '<option value="">-- Select Subject --</option>';
-    subjects.forEach(s => subjectSelect.innerHTML += `<option value="${s}">${s}</option>`);
+    subjects.forEach(s => {
+      subjectSelect.innerHTML += `<option value="${s}">${s}</option>`;
+    });
     subjectSelect.disabled = false;
     log(`✅ Found ${subjects.length} subjects.`);
   } catch (err) {
@@ -47,6 +48,7 @@ classSelect.addEventListener('change', async () => {
   }
 });
 
+// Fetch chapters
 subjectSelect.addEventListener('change', async () => {
   const selectedClass = classSelect.value;
   const subject = subjectSelect.value;
@@ -55,14 +57,15 @@ subjectSelect.addEventListener('change', async () => {
   generateBtn.disabled = true;
 
   log(`📖 Fetching chapters for ${subject} (Class ${selectedClass})...`);
-  const prompt = `List all NCERT chapters for Class ${selectedClass}, Subject ${subject} as a JSON array of chapter names only.`;
-
+  const prompt = `List all NCERT chapters for Class ${selectedClass}, Subject ${subject} as a JSON array of chapter names.`;
   try {
     const data = await askGemini(prompt);
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
     const chapters = JSON.parse(text.replace(/```json|```/g, '').trim());
     chapterSelect.innerHTML = '<option value="">-- Select Chapter --</option>';
-    chapters.forEach(ch => chapterSelect.innerHTML += `<option value="${ch}">${ch}</option>`);
+    chapters.forEach(ch => {
+      chapterSelect.innerHTML += `<option value="${ch}">${ch}</option>`;
+    });
     chapterSelect.disabled = false;
     log(`✅ Found ${chapters.length} chapters.`);
   } catch (err) {
@@ -70,6 +73,7 @@ subjectSelect.addEventListener('change', async () => {
   }
 });
 
+// Generate questions
 generateBtn.addEventListener('click', async () => {
   const chapter = chapterSelect.value;
   const subject = subjectSelect.value;
@@ -77,7 +81,7 @@ generateBtn.addEventListener('click', async () => {
   if (!chapter) return alert("Please select a chapter first.");
 
   const tableName = chapter.toLowerCase().replace(/\s+/g, '_');
-  log(`🧾 Checking or creating table: ${tableName}`);
+  log(`🧾 Preparing table: ${tableName}`);
 
   const columns = [
     'difficulty', 'question_type', 'question_text',
@@ -94,29 +98,16 @@ generateBtn.addEventListener('click', async () => {
 
     ALTER TABLE ${tableName} ENABLE ROW LEVEL SECURITY;
 
-    DO $$ BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = '${tableName}' AND policyname = 'Enable insert for authenticated users') THEN
-        CREATE POLICY "Enable insert for authenticated users" ON ${tableName}
-        FOR INSERT
-        TO anon, authenticated
-        USING (true)
-        WITH CHECK (true);
-      END IF;
-    END$$;
+    CREATE POLICY IF NOT EXISTS "insert_auth" ON ${tableName}
+    FOR INSERT TO anon, authenticated USING (true) WITH CHECK (true);
 
-    DO $$ BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = '${tableName}' AND policyname = 'Enable read access for all users') THEN
-        CREATE POLICY "Enable read access for all users" ON ${tableName}
-        FOR SELECT
-        TO public
-        USING (true);
-      END IF;
-    END$$;
+    CREATE POLICY IF NOT EXISTS "select_all" ON ${tableName}
+    FOR SELECT TO public USING (true);
   `;
 
   const { error: createError } = await supabase.rpc('execute_sql', { query: sql });
   if (createError) {
-    log(`⚠️ Table creation failed: ${createError.message}`);
+    log(`⚠️ Table or RLS setup failed: ${createError.message}`);
     return;
   }
 
@@ -124,13 +115,9 @@ generateBtn.addEventListener('click', async () => {
 
   log(`📚 Generating 60 questions for ${subject} → ${chapter}...`);
   const prompt = `
-Generate exactly 60 unique quiz questions for Class ${selectedClass}, Subject ${subject}, Chapter ${chapter}.
-Return ONLY a valid CSV with these headers:
+Generate exactly 60 quiz questions for Class ${selectedClass}, Subject ${subject}, Chapter ${chapter}.
+Return ONLY a valid CSV with headers:
 difficulty,question_type,question_text,scenario_reason_text,option_a,option_b,option_c,option_d,correct_answer_key
-Distribution:
-- Simple: 20 (10 MCQ, 5 AR, 5 Case-Based)
-- Medium: 20 (10 MCQ, 5 AR, 5 Case-Based)
-- Advanced: 20 (10 MCQ, 5 AR, 5 Case-Based)
 `;
 
   try {
@@ -142,7 +129,7 @@ Distribution:
 
     const { error: insertError } = await supabase.from(tableName).insert(rows);
     if (insertError) throw insertError;
-    log(`🎉 Successfully inserted ${rows.length} questions into ${tableName}.`);
+    log(`🎉 Successfully inserted ${rows.length} questions.`);
   } catch (err) {
     log(`❌ Error: ${err.message}`);
   }
