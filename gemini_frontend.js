@@ -80,6 +80,7 @@ classSelect.addEventListener('change', async () => {
 });
 
 // ------------- Handle Subject Selection -------------
+// ------------- Handle Subject Selection (Fixed JSON Parsing) -------------
 subjectSelect.addEventListener('change', async () => {
   const selectedClass = classSelect.value;
   const subject = subjectSelect.value;
@@ -88,15 +89,24 @@ subjectSelect.addEventListener('change', async () => {
   generateBtn.disabled = true;
 
   log(`📖 Fetching chapters for ${subject} (Class ${selectedClass})...`);
-  const prompt = `List all NCERT chapters for Class ${selectedClass}, Subject ${subject} as a JSON array of chapter names only.`;
+  const prompt = `List all NCERT chapters for Class ${selectedClass}, Subject ${subject} as a JSON array of chapter names only. Example: ["Chapter 1: ...", "Chapter 2: ..."]`;
 
   try {
     const text = await askGemini(prompt);
-    const chapters = JSON.parse(text.replace(/```json|```/g, '').trim());
+    let cleaned = text
+      .replace(/```json|```/g, '')
+      .replace(/^.*?\[/s, '[') // remove anything before first [
+      .replace(/\].*$/s, ']') // remove anything after last ]
+      .trim();
+
+    const chapters = JSON.parse(cleaned);
+    if (!Array.isArray(chapters) || chapters.length === 0) throw new Error("No chapters found");
+
     chapterSelect.innerHTML = '<option value="">-- Select Chapter --</option>';
     chapters.forEach((ch) => {
       chapterSelect.innerHTML += `<option value="${ch}">${ch}</option>`;
     });
+
     chapterSelect.disabled = false;
     log(`✅ Found ${chapters.length} chapters.`);
   } catch (err) {
