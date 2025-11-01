@@ -1,17 +1,17 @@
 // /api/perplexity.js
 
 export const config = {
-  runtime: "edge", // fast, lightweight
+  runtime: "nodejs", // ✅ use Node.js to access process.env
 };
 
-export default async function handler(req) {
+export default async function handler(req, res) {
   // --- CORS setup ---
   const allowedOrigins = [
     "https://ready4exam.github.io",
     "http://localhost:5500",
     "http://127.0.0.1:5500",
   ];
-  const origin = req.headers.get("origin");
+  const origin = req.headers.origin;
   const corsHeaders = {
     "Access-Control-Allow-Origin": allowedOrigins.includes(origin)
       ? origin
@@ -21,43 +21,36 @@ export default async function handler(req) {
   };
 
   if (req.method === "OPTIONS") {
-    return new Response(null, { status: 200, headers: corsHeaders });
+    res.writeHead(200, corsHeaders);
+    return res.end();
   }
 
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    res.writeHead(405, { ...corsHeaders, "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ error: "Method not allowed" }));
   }
 
   // --- Parse body safely ---
   let body;
   try {
-    body = await req.json();
+    body = req.body ? req.body : JSON.parse(await streamToString(req));
   } catch {
-    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    res.writeHead(400, { ...corsHeaders, "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ error: "Invalid JSON body" }));
   }
 
   const { prompt } = body || {};
   if (!prompt || typeof prompt !== "string") {
-    return new Response(JSON.stringify({ error: "Missing or invalid 'prompt'" }), {
-      status: 400,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    res.writeHead(400, { ...corsHeaders, "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ error: "Missing or invalid 'prompt'" }));
   }
 
   // --- Ensure key exists ---
   const apiKey = process.env.PERPLEXITY_API_KEY;
   if (!apiKey) {
     console.error("❌ Missing PERPLEXITY_API_KEY in environment");
-    return new Response(JSON.stringify({ error: "Server misconfiguration" }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    res.writeHead(500, { ...corsHeaders, "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ error: "Server misconfiguration" }));
   }
 
   // --- Call Perplexity API ---
@@ -86,29 +79,31 @@ export default async function handler(req) {
       data = JSON.parse(text);
     } catch {
       console.error("⚠️ Non-JSON Perplexity response:", text);
-      return new Response(JSON.stringify({ raw: text }), {
-        status: perplexityRes.status,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      res.writeHead(perplexityRes.status, { ...corsHeaders, "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ raw: text }));
     }
 
     if (!perplexityRes.ok) {
       console.error("❌ Perplexity API Error:", data);
-      return new Response(JSON.stringify({ error: "Perplexity API failed", data }), {
-        status: perplexityRes.status,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      res.writeHead(perplexityRes.status, { ...corsHeaders, "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: "Perplexity API failed", data }));
     }
 
-    return new Response(JSON.stringify(data), {
-      status: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    res.writeHead(200, { ...corsHeaders, "Content-Type": "application/json" });
+    return res.end(JSON.stringify(data));
   } catch (err) {
     console.error("🔥 Unexpected error:", err);
-    return new Response(JSON.stringify({ error: err.message }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    res.writeHead(500, { ...corsHeaders, "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ error: err.message }));
   }
+}
+
+// --- Helper for reading request stream ---
+function streamToString(stream) {
+  const chunks = [];
+  return new Promise((resolve, reject) => {
+    stream.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+    stream.on("error", (err) => reject(err));
+    stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+  });
 }
