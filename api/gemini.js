@@ -1,5 +1,6 @@
+// File: /api/gemini.js
 export const config = {
-  runtime: "edge", // super fast
+  runtime: "edge",
 };
 
 export default async function handler(req) {
@@ -18,36 +19,52 @@ export default async function handler(req) {
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
   };
 
-  const send = (body, status = 200) =>
-    new Response(JSON.stringify(body), {
-      status,
+  // --- Handle preflight
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 200, headers: corsHeaders });
+  }
+
+  // --- Only POST allowed
+  if (req.method !== "POST") {
+    return new Response(JSON.stringify({ error: "Only POST allowed" }), {
+      status: 405,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+  }
 
-  if (req.method === "OPTIONS") return send({}, 200);
-  if (req.method !== "POST") return send({ error: "Only POST allowed" }, 405);
-
+  // --- Parse request body
   let body;
   try {
     body = await req.json();
   } catch {
-    return send({ error: "Invalid JSON body" }, 400);
+    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+      status: 400,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 
-  const { prompt } = body;
-  if (!prompt || typeof prompt !== "string" || !prompt.trim())
-    return send({ error: "Missing or invalid 'prompt'" }, 400);
+  const { prompt } = body || {};
+  if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
+    return new Response(JSON.stringify({ error: "Missing or invalid 'prompt'" }), {
+      status: 400,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
 
-  const apiKey = process.env.google_api;
-  if (!apiKey)
-    return send(
-      { error: "Missing GOOGLE_API key in environment variables" },
-      500
-    );
+  // --- Check for API key
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    console.error("❌ Missing GEMINI_API_KEY in environment variables");
+    return new Response(JSON.stringify({ error: "Server misconfiguration" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
 
   try {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" +
+        apiKey,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -55,13 +72,7 @@ export default async function handler(req) {
           contents: [
             {
               role: "user",
-              parts: [
-                {
-                  text:
-                    "You are an education data assistant. Return clean, structured JSON or lists — no markdown or extra text.\n\n" +
-                    prompt.trim(),
-                },
-              ],
+              parts: [{ text: prompt.trim() }],
             },
           ],
         }),
@@ -69,10 +80,15 @@ export default async function handler(req) {
     );
 
     const data = await response.json();
-    if (!response.ok) return send({ error: "Gemini API failed", data }, response.status);
-
-    return send(data, 200);
+    return new Response(JSON.stringify(data), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   } catch (err) {
-    return send({ error: err.message }, 500);
+    console.error("🔥 Gemini request failed:", err);
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 }
