@@ -3,53 +3,28 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Automation Tool - Ready4Exam</title>
+  <title>Ready4Exam Automation Tool</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body {
       font-family: "Poppins", sans-serif;
-      background: #f8fafc;
+      background: #f9fafb;
       color: #111;
       margin: 0;
       padding: 2rem;
     }
-    h1 {
-      text-align: center;
-      color: #2563eb;
-    }
-    select, textarea, button {
-      width: 100%;
-      margin: 10px 0;
-      padding: 10px;
-      border: 1px solid #ccc;
-      border-radius: 8px;
-      font-size: 16px;
-    }
-    textarea {
-      height: 150px;
-      resize: vertical;
-    }
-    #log {
-      white-space: pre-wrap;
-      background: #111;
-      color: #0f0;
-      padding: 10px;
-      border-radius: 8px;
-      font-size: 14px;
-      height: 200px;
-      overflow-y: auto;
+    h1 { text-align: center; color: #2563eb; }
+    select, button {
+      width: 100%; padding: 10px; margin: 8px 0;
+      border: 1px solid #ccc; border-radius: 8px; font-size: 16px;
     }
     button {
-      background: #2563eb;
-      color: #fff;
-      cursor: pointer;
-      border: none;
-      font-size: 16px;
-      border-radius: 8px;
-      padding: 10px 20px;
+      background: #2563eb; color: white; cursor: pointer; border: none;
     }
-    button:hover {
-      background: #1d4ed8;
+    button:hover { background: #1d4ed8; }
+    pre {
+      background: #111; color: #0f0; padding: 10px;
+      border-radius: 8px; height: 220px; overflow-y: auto;
     }
   </style>
 </head>
@@ -59,14 +34,9 @@
   <label>Select Class:</label>
   <select id="classSelect">
     <option value="">-- Select Class --</option>
-    <option>5</option>
-    <option>6</option>
-    <option>7</option>
-    <option>8</option>
-    <option>9</option>
-    <option>10</option>
-    <option>11</option>
-    <option>12</option>
+    <option>5</option><option>6</option><option>7</option>
+    <option>8</option><option>9</option><option>10</option>
+    <option>11</option><option>12</option>
   </select>
 
   <label>Select Subject:</label>
@@ -75,7 +45,7 @@
   <label>Select Chapter:</label>
   <select id="chapterSelect"></select>
 
-  <button id="generateBtn">🚀 Generate Questions & Upload</button>
+  <button id="generateBtn">🚀 Generate & Upload Questions</button>
 
   <h3>Logs:</h3>
   <pre id="log"></pre>
@@ -90,120 +60,122 @@
     const log = (msg) => {
       console.log(msg);
       logEl.textContent += msg + "\n";
+      logEl.scrollTop = logEl.scrollHeight;
     };
 
     const classSelect = document.getElementById("classSelect");
     const subjectSelect = document.getElementById("subjectSelect");
     const chapterSelect = document.getElementById("chapterSelect");
 
+    // 🧠 Ask Perplexity through Vercel proxy
+    async function askPerplexity(prompt) {
+      log(`🧠 Asking Perplexity...`);
+      const res = await fetch(PPLX_PROXY, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+      if (!res.ok) throw new Error(`Perplexity request failed (${res.status})`);
+      return await res.text();
+    }
+
     classSelect.addEventListener("change", async () => {
-      const selectedClass = classSelect.value;
+      const cls = classSelect.value;
       subjectSelect.innerHTML = "";
       chapterSelect.innerHTML = "";
-      if (!selectedClass) return;
+      if (!cls) return;
+      log(`🔍 Fetching NCERT subjects for Class ${cls}...`);
 
-      log(`🔍 Fetching NCERT subjects for Class ${selectedClass}...`);
-
-      const prompt = `List all NCERT subjects for Class ${selectedClass} as a JSON array. Example: ["Science", "Mathematics", "Social Science"].`;
-
-      const response = await askPerplexity(prompt);
+      const prompt = `List all NCERT subjects for Class ${cls} as a JSON array. Example: ["Science", "Mathematics", "Social Science"].`;
+      const result = await askPerplexity(prompt);
       try {
-        const subjects = JSON.parse(response);
+        const subjects = JSON.parse(result);
         subjectSelect.innerHTML = `<option value="">-- Select Subject --</option>`;
-        subjects.forEach((subj) => {
-          subjectSelect.innerHTML += `<option value="${subj}">${subj}</option>`;
-        });
-        log(`✅ Found ${subjects.length} subjects for Class ${selectedClass}.`);
-      } catch (err) {
-        log(`❌ Failed to parse subjects: ${err.message}`);
+        subjects.forEach((s) => subjectSelect.innerHTML += `<option>${s}</option>`);
+        log(`✅ Found ${subjects.length} subjects for Class ${cls}.`);
+      } catch {
+        log(`❌ Failed to parse Perplexity response.`);
       }
     });
 
     subjectSelect.addEventListener("change", async () => {
-      const selectedClass = classSelect.value;
-      const selectedSubject = subjectSelect.value;
+      const cls = classSelect.value;
+      const subj = subjectSelect.value;
       chapterSelect.innerHTML = "";
-      if (!selectedSubject) return;
+      if (!subj) return;
+      log(`📚 Fetching chapters for ${subj}, Class ${cls}...`);
 
-      log(`📚 Fetching chapters for ${selectedSubject}, Class ${selectedClass}...`);
-
-      const prompt = `List all chapters in the NCERT ${selectedSubject} textbook for Class ${selectedClass} as a JSON array.`;
-
-      const response = await askPerplexity(prompt);
+      const prompt = `List all chapter names from the NCERT ${subj} textbook for Class ${cls} as a JSON array.`;
+      const result = await askPerplexity(prompt);
       try {
-        const chapters = JSON.parse(response);
+        const chapters = JSON.parse(result);
         chapterSelect.innerHTML = `<option value="">-- Select Chapter --</option>`;
-        chapters.forEach((ch) => {
-          chapterSelect.innerHTML += `<option value="${ch}">${ch}</option>`;
-        });
-        log(`✅ Found ${chapters.length} chapters for ${selectedSubject}.`);
-      } catch (err) {
-        log(`❌ Failed to parse chapters: ${err.message}`);
+        chapters.forEach((ch) => chapterSelect.innerHTML += `<option>${ch}</option>`);
+        log(`✅ Found ${chapters.length} chapters.`);
+      } catch {
+        log(`❌ Failed to parse chapters.`);
       }
     });
 
     document.getElementById("generateBtn").addEventListener("click", async () => {
       const cls = classSelect.value;
-      const subject = subjectSelect.value;
-      const chapter = chapterSelect.value;
+      const subj = subjectSelect.value;
+      const ch = chapterSelect.value;
 
-      if (!cls || !subject || !chapter)
-        return alert("Please select class, subject, and chapter first.");
+      if (!cls || !subj || !ch) return alert("Select Class, Subject, and Chapter first!");
 
-      const tableName = formatTableName(chapter);
-      log(`🧠 Creating Supabase table: ${tableName}...`);
+      const tableName = formatTableName(ch);
+      log(`🧩 Preparing table: ${tableName}...`);
 
       const { error: tableErr } = await createTableIfNotExists(tableName);
       if (tableErr) {
-        log(`❌ Failed to create table: ${tableErr.message}`);
+        log(`❌ Table creation failed: ${tableErr.message}`);
         return;
       }
 
-      log(`✅ Table "${tableName}" ready. Generating quiz questions...`);
-
+      log(`✅ Table ready. Generating questions...`);
       const prompt = `
-Generate exactly 60 unique quiz questions from the NCERT Class ${cls}, Subject: ${subject}, Chapter: "${chapter}".
-Format output strictly as CSV with these columns:
+Generate exactly 60 unique quiz questions from NCERT Class ${cls}, Subject: ${subj}, Chapter: "${ch}".
+Return strictly as CSV with these headers:
 difficulty,question_type,question_text,scenario_reason_text,option_a,option_b,option_c,option_d,correct_answer_key
-Follow these rules:
-- Simple: 20 questions (10 MCQ, 5 AR, 5 Case-Based)
-- Medium: 20 questions (10 MCQ, 5 AR, 5 Case-Based)
-- Advanced: 20 questions (10 MCQ, 5 AR, 5 Case-Based)
-Return only CSV data, no extra text.`;
+Follow this distribution:
+- Simple: 20 (10 MCQ, 5 AR, 5 Case-Based)
+- Medium: 20 (10 MCQ, 5 AR, 5 Case-Based)
+- Advanced: 20 (10 MCQ, 5 AR, 5 Case-Based)
+Return CSV only, no explanations.`;
 
-      const csvText = await askPerplexity(prompt);
-      log(`✅ Questions generated. Uploading to Supabase...`);
+      const csv = await askPerplexity(prompt);
+      const rows = parseCSV(csv);
+      log(`✅ Generated ${rows.length} rows. Uploading...`);
 
-      const rows = parseCSV(csvText);
       const { error: insertErr } = await supabase.from(tableName).insert(rows);
       if (insertErr) {
         log(`❌ Upload failed: ${insertErr.message}`);
-        return;
+      } else {
+        log(`🎉 Successfully inserted ${rows.length} records into "${tableName}".`);
       }
-      log(`🎉 Successfully inserted ${rows.length} questions into "${tableName}".`);
     });
 
-    async function askPerplexity(prompt) {
-      log(`🧠 Asking Perplexity...`);
-      const r = await fetch(PPLX_PROXY, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+    function parseCSV(text) {
+      text = text.replace(/^\uFEFF/, "").trim();
+      const lines = text.split("\n").filter(l => l.trim());
+      const header = lines[0].split(",").map(h => h.trim());
+      return lines.slice(1).map(line => {
+        const vals = line.split(",").map(v => v.trim().replace(/^"|"$/g, ""));
+        const obj = {};
+        header.forEach((h, i) => (obj[h] = vals[i] || ""));
+        return obj;
       });
-      if (!r.ok) throw new Error("Failed to fetch from Perplexity proxy");
-      return await r.text();
     }
 
-    function formatTableName(chapter) {
-      const words = chapter.trim().split(/\s+/);
-      return words.length > 1
-        ? `${words[0].toLowerCase()}_${words[1].toLowerCase()}`
-        : words[0].toLowerCase();
+    function formatTableName(ch) {
+      const words = ch.trim().split(/\s+/);
+      return words.slice(0, 2).join("_").toLowerCase();
     }
 
-    async function createTableIfNotExists(tableName) {
+    async function createTableIfNotExists(table) {
       const ddl = `
-      CREATE TABLE IF NOT EXISTS ${tableName} (
+      CREATE TABLE IF NOT EXISTS ${table} (
         id SERIAL PRIMARY KEY,
         difficulty TEXT,
         question_type TEXT,
@@ -221,19 +193,6 @@ Return only CSV data, no extra text.`;
       } catch (err) {
         return { error: err };
       }
-    }
-
-    function parseCSV(csvText) {
-      csvText = csvText.replace(/^\uFEFF/, "").trim();
-      const lines = csvText.split("\n").filter(l => l.trim());
-      const header = lines[0].split(",").map(h => h.trim());
-      const rows = lines.slice(1).map(line => {
-        const values = line.split(",").map(v => v.trim().replace(/^"|"$/g, ""));
-        const obj = {};
-        header.forEach((h, i) => (obj[h] = values[i] || ""));
-        return obj;
-      });
-      return rows;
     }
   </script>
 </body>
