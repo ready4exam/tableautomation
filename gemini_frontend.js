@@ -248,10 +248,13 @@ async function updateCurriculum(chapterTitle, newId) {
     const res = await fetch(CURRICULUM_URL);
     let text = await res.text();
 
+    // Escape special regex chars in chapterTitle
     const safeTitle = chapterTitle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    // 🧠 Match even if curriculum title includes "Chapter X:" prefix
     const regex = new RegExp(
-      `\\{\\s*id:\\s*"(.*?)",\\s*title:\\s*"${safeTitle}"\\s*\\}`,
-      "g"
+      `\\{\\s*id:\\s*"(.*?)",\\s*title:\\s*"(?:Chapter\\s*\\d+:\\s*)?${safeTitle}"\\s*\\}`,
+      "gi"
     );
 
     let updated = false;
@@ -266,7 +269,9 @@ async function updateCurriculum(chapterTitle, newId) {
       return;
     }
 
+    // Optional: preview first 800 chars of modified file
     console.log("✅ Updated curriculum.js content preview:\n", text.slice(0, 800));
+
   } catch (err) {
     log(`❌ Failed to update curriculum.js: ${err.message}`);
   }
