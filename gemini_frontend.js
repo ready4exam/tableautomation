@@ -4,6 +4,7 @@
 
 import { supabase } from './supabaseClient.js';
 
+
 const GEMINI_API_KEY = "AIzaSyBX5TYNhyMR9S8AODdFkfsJW-vSbVZVI5Y"; // 🔑 Replace with your Gemini API key
 
 const classSelect = document.getElementById('classSelect');
