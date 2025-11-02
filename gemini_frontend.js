@@ -3,7 +3,8 @@
 // Creates RLS-enabled tables, adds policies, and uploads generated quiz data
 
 import { supabase } from './supabaseClient.js';
-import * as Papa from "https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js";
+import Papa from "https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.js";
+
 // ✅ Added Papa Parse import
 
 const GEMINI_API_KEY = "AIzaSyBX5TYNhyMR9S8AODdFkfsJW-vSbVZVI5Y"; // 🔑 Replace with your Gemini API key
