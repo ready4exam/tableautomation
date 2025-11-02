@@ -3,11 +3,6 @@
 // Creates RLS-enabled tables, adds policies, and uploads generated quiz data
 
 import { supabase } from './supabaseClient.js';
-// Replace the global script loading with a direct ES Module import
-import Papa from 'https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.js';
-// Note the change from papaparse.min.js to papaparse.esm.js for module support.
-
-// ✅ Added Papa Parse import
 
 const GEMINI_API_KEY = "AIzaSyBX5TYNhyMR9S8AODdFkfsJW-vSbVZVI5Y"; // 🔑 Replace with your Gemini API key
 
@@ -17,7 +12,7 @@ const chapterSelect = document.getElementById('chapterSelect');
 const generateBtn = document.getElementById('generateBtn');
 const logEl = document.getElementById('log');
 
-// ------------- Logging -------------
+// ------------------- Logging -------------------
 const log = (msg) => {
   console.log(msg);
   if (logEl) {
@@ -26,7 +21,7 @@ const log = (msg) => {
   }
 };
 
-// ------------- Ask Gemini API -------------
+// ------------------- Ask Gemini API -------------------
 async function askGemini(prompt) {
   log("🧠 Asking Gemini 2.5 Flash...");
 
@@ -47,22 +42,85 @@ async function askGemini(prompt) {
   return text;
 }
 
-// ------------- Parse CSV (Replaced with Papa Parse) -------------
-function parseCSV(csvText) {
-  const parsed = Papa.parse(csvText.trim(), {
-    header: true,
-    skipEmptyLines: true,
-  });
+// ------------------- CSV Parsing & Quoting -------------------
+// Safe parser that handles commas and quotes in text fields.
+function parseAndSanitizeCSV(csvText) {
+  if (!csvText || typeof csvText !== "string") return [];
 
-  if (parsed.errors.length) {
-    console.error("CSV parse errors:", parsed.errors);
-    throw new Error("Invalid CSV format received from Gemini.");
+  // Clean up
+  let txt = csvText.replace(/^\uFEFF/, '').replace(/```csv|```/g, '').trim();
+  const lines = txt.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) throw new Error("CSV contains no data");
+
+  const headers = lines[0].split(',').map(h => h.trim());
+  const expectedCols = headers.length;
+  const rows = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    let parts = lines[i].split(',');
+    if (parts.length > expectedCols) {
+      const first2 = parts.slice(0, 2);
+      const last5 = parts.slice(-5);
+      const middle = parts.slice(2, parts.length - 5).join(',').trim();
+
+      const splitIdx = findSplitBetweenQuestionAndScenario(middle);
+      let question_text = middle;
+      let scenario_reason_text = '';
+      if (splitIdx !== -1) {
+        question_text = middle.slice(0, splitIdx).trim();
+        scenario_reason_text = middle.slice(splitIdx + 1).trim();
+      }
+      parts = [...first2, question_text, scenario_reason_text, ...last5];
+    }
+
+    while (parts.length < expectedCols) parts.push('');
+
+    const obj = {};
+    headers.forEach((h, idx) => {
+      obj[h] = (parts[idx] || '').trim();
+    });
+
+    // Escape quotes and normalize
+    ['question_text', 'scenario_reason_text', 'option_a', 'option_b', 'option_c', 'option_d'].forEach(k => {
+      obj[k] = obj[k]?.replace(/\s+/g, ' ').trim().replace(/"/g, '""') || '';
+    });
+
+    obj['correct_answer_key'] = obj['correct_answer_key']?.trim().toUpperCase().slice(0, 1) || '';
+
+    rows.push(obj);
   }
 
-  return parsed.data;
+  return rows;
 }
 
-// ------------- Handle Class Selection -------------
+function findSplitBetweenQuestionAndScenario(s) {
+  const commas = [];
+  for (let i = 0; i < s.length; i++) if (s[i] === ',') commas.push(i);
+  if (commas.length === 0) return -1;
+  for (let j = commas.length - 1; j >= 0; j--) {
+    const idx = commas[j];
+    const right = s.slice(idx + 1).trim();
+    if (right.length > 0 && right.length <= 300) return idx;
+  }
+  return commas[0];
+}
+
+// Optional helper for CSV export (quoted fields)
+function exportCsvWithQuotes(rows) {
+  if (!rows?.length) return '';
+  const headers = [
+    'difficulty','question_type','question_text','scenario_reason_text',
+    'option_a','option_b','option_c','option_d','correct_answer_key'
+  ];
+  const lines = [headers.join(',')];
+  for (const r of rows) {
+    const quoted = headers.map(k => `"${(r[k] || '').replace(/"/g, '""')}"`);
+    lines.push(quoted.join(','));
+  }
+  return lines.join('\n');
+}
+
+// ------------------- Handle Class Selection -------------------
 classSelect.addEventListener('change', async () => {
   const selectedClass = classSelect.value;
   if (!selectedClass) return;
@@ -88,7 +146,7 @@ classSelect.addEventListener('change', async () => {
   }
 });
 
-// ------------- Handle Subject Selection -------------
+// ------------------- Handle Subject Selection -------------------
 subjectSelect.addEventListener('change', async () => {
   const selectedClass = classSelect.value;
   const subject = subjectSelect.value;
@@ -114,26 +172,24 @@ subjectSelect.addEventListener('change', async () => {
   }
 });
 
-// ------------- Handle Chapter Selection -------------
+// ------------------- Handle Chapter Selection -------------------
 chapterSelect.addEventListener('change', () => {
   generateBtn.disabled = !chapterSelect.value;
 });
 
-// ------------- Handle Question Generation -------------
+// ------------------- Handle Question Generation -------------------
 generateBtn.addEventListener('click', async () => {
   const selectedClass = classSelect.value;
   const subject = subjectSelect.value;
   const chapter = chapterSelect.value;
   if (!chapter) return alert("Please select a chapter first.");
 
-  // ✅ Fixed: Proper table name after colon/semicolon
   const tableName = (() => {
     let cleanChapter = chapter
       .toLowerCase()
-      .replace(/[:;.,!?'"()]/g, '') // remove invalid chars
-      .replace(/\s+/g, ' ') // normalize spaces
+      .replace(/[:;.,!?'"()]/g, '')
+      .replace(/\s+/g, ' ')
       .trim();
-
     const words = cleanChapter.split(' ').filter(Boolean);
     return words.length > 1 ? `${words[0]}_${words[1]}` : `${words[0]}_quiz`;
   })();
@@ -142,8 +198,8 @@ generateBtn.addEventListener('click', async () => {
 
   const columns = [
     'difficulty', 'question_type', 'question_text',
-    'scenario_reason_text', 'option_a', 'option_b', 'option_c',
-    'option_d', 'correct_answer_key'
+    'scenario_reason_text', 'option_a', 'option_b',
+    'option_c', 'option_d', 'correct_answer_key'
   ];
 
   const sql = `
@@ -207,11 +263,9 @@ Distribution:
   try {
     const csvText = await askGemini(prompt);
     log("✅ CSV received. Parsing...");
-
-    // ✅ Papa Parse applied here
-    const rows = parseCSV(csvText);
-
+    const rows = parseAndSanitizeCSV(csvText);
     log(`📤 Uploading ${rows.length} rows to Supabase...`);
+
     const { error: insertError } = await supabase.from(tableName).insert(rows);
     if (insertError) throw insertError;
     log(`🎉 Successfully inserted ${rows.length} questions into ${tableName}.`);
