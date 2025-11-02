@@ -61,7 +61,6 @@ function extractArrayFromText(text) {
   if (!text || typeof text !== "string") return [];
 
   try {
-    // Try to find any JSON block in text
     const match = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
     if (match) {
       const candidate = match[0]
@@ -70,7 +69,6 @@ function extractArrayFromText(text) {
         .trim();
       const parsed = JSON.parse(candidate);
 
-      // Handle { "subjects": [...] } or { "chapters": [...] }
       if (Array.isArray(parsed)) return parsed;
       if (parsed.subjects && Array.isArray(parsed.subjects)) return parsed.subjects;
       if (parsed.chapters && Array.isArray(parsed.chapters)) return parsed.chapters;
@@ -80,11 +78,9 @@ function extractArrayFromText(text) {
     console.warn("⚠️ JSON parse failed:", e);
   }
 
-  // Try extracting quoted list manually
   const quoted = Array.from(text.matchAll(/"([^"]+)"/g)).map(m => m[1]);
   if (quoted.length) return quoted;
 
-  // Fallback: comma-separated
   const parts = text.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
   if (parts.length) return parts;
 
@@ -150,7 +146,6 @@ subjectSelect.addEventListener("change", async () => {
 
   log(`📖 Fetching chapters for ${subject} (Class ${selectedClass})...`);
 
-  // ✅ Updated, more reliable prompt
   const prompt = `
 Return ONLY a valid JSON array (no markdown, no code fences) of official NCERT chapter titles
 for Class ${selectedClass}, Subject ${subject}.
@@ -187,8 +182,13 @@ generateBtn.addEventListener("click", async () => {
   const chapter = chapterSelect.value;
   if (!chapter) return alert("Please select a chapter first.");
 
+  // ✅ Clean chapter name to avoid "Chapter 7" prefix in table names
+  const cleanedChapter = chapter
+    .replace(/^Chapter\s*\d*[:.\-]?\s*/i, "")
+    .trim();
+
   const tableName = (() => {
-    let clean = chapter
+    let clean = cleanedChapter
       .toLowerCase()
       .replace(/[:;.,!?'"()]/g, "")
       .replace(/\s+/g, "_")
@@ -271,8 +271,26 @@ Distribution:
     const csvText = await askGemini(prompt);
     log("✅ CSV received. Parsing...");
     const rows = parseCSV(csvText);
-    log(`📤 Uploading ${rows.length} rows to Supabase...`);
 
+    // ✅ Enforce column consistency for Supabase
+    const expectedColumns = [
+      "difficulty",
+      "question_type",
+      "question_text",
+      "scenario_reason_text",
+      "option_a",
+      "option_b",
+      "option_c",
+      "option_d",
+      "correct_answer_key"
+    ];
+    rows.forEach((r) => {
+      expectedColumns.forEach(col => {
+        if (!(col in r)) r[col] = "";
+      });
+    });
+
+    log(`📤 Uploading ${rows.length} rows to Supabase...`);
     const { error: insertError } = await supabase.from(tableName).insert(rows);
     if (insertError) throw insertError;
     log(`🎉 Successfully inserted ${rows.length} questions into ${tableName}.`);
