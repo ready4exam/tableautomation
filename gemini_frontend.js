@@ -24,23 +24,51 @@ const log = (msg) => {
 
 // ------------- Ask Gemini API -------------
 async function askGemini(prompt) {
-  log("🧠 Asking Gemini 2.5 Flash...");
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-    {
+  const body = {
+    contents: [
+      {
+        role: "user",
+        parts: [{ text: prompt }]
+      }
+    ]
+  };
+
+  try {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      body: JSON.stringify(body)
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`HTTP ${res.status}: ${text}`);
     }
-  );
 
-  if (!res.ok) throw new Error(`Gemini request failed (${res.status})`);
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-  return text.replace(/```csv|```/g, "").trim();
+    const data = await res.json();
+    const output = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+
+    if (!output) throw new Error("Empty response from Gemini");
+
+    // ✅ Extract JSON block even if wrapped in text or markdown
+    const match = output.match(/\[[\s\S]*\]/);
+    if (match) {
+      try {
+        return JSON.parse(match[0]);
+      } catch (err) {
+        console.warn("⚠️ Invalid JSON inside Gemini output:", err);
+      }
+    }
+
+    // Return raw text if no valid JSON found
+    return output;
+  } catch (err) {
+    console.error("❌ Gemini API error:", err);
+    throw err;
+  }
 }
-
 // ------------- Robust Text → Array extractor -------------
 function extractArrayFromText(text) {
   if (!text || typeof text !== "string") return [];
