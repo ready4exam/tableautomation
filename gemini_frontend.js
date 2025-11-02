@@ -3,6 +3,7 @@
 // Creates RLS-enabled tables, adds policies, and uploads generated quiz data
 
 import { supabase } from './supabaseClient.js';
+import Papa from 'papaparse'; // ✅ Added Papa Parse import
 
 const GEMINI_API_KEY = "AIzaSyBX5TYNhyMR9S8AODdFkfsJW-vSbVZVI5Y"; // 🔑 Replace with your Gemini API key
 
@@ -42,16 +43,19 @@ async function askGemini(prompt) {
   return text;
 }
 
-// ------------- Parse CSV -------------
-function parseCSV(csv) {
-  const lines = csv.trim().split("\n");
-  const headers = lines[0].split(",").map((h) => h.trim());
-  return lines.slice(1).map((line) => {
-    const values = line.split(",").map((v) => v.trim().replace(/^"|"$/g, ""));
-    const row = {};
-    headers.forEach((h, i) => (row[h] = values[i]));
-    return row;
+// ------------- Parse CSV (Replaced with Papa Parse) -------------
+function parseCSV(csvText) {
+  const parsed = Papa.parse(csvText.trim(), {
+    header: true,
+    skipEmptyLines: true,
   });
+
+  if (parsed.errors.length) {
+    console.error("CSV parse errors:", parsed.errors);
+    throw new Error("Invalid CSV format received from Gemini.");
+  }
+
+  return parsed.data;
 }
 
 // ------------- Handle Class Selection -------------
@@ -199,9 +203,11 @@ Distribution:
   try {
     const csvText = await askGemini(prompt);
     log("✅ CSV received. Parsing...");
-    const rows = parseCSV(csvText);
-    log(`📤 Uploading ${rows.length} rows to Supabase...`);
 
+    // ✅ Papa Parse applied here
+    const rows = parseCSV(csvText);
+
+    log(`📤 Uploading ${rows.length} rows to Supabase...`);
     const { error: insertError } = await supabase.from(tableName).insert(rows);
     if (insertError) throw insertError;
     log(`🎉 Successfully inserted ${rows.length} questions into ${tableName}.`);
