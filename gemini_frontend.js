@@ -149,10 +149,17 @@ subjectSelect.addEventListener("change", async () => {
   generateBtn.disabled = true;
 
   log(`📖 Fetching chapters for ${subject} (Class ${selectedClass})...`);
-  const prompt = `List all NCERT chapters for Class ${selectedClass}, Subject ${subject} as a JSON array of chapter names only.`;
+
+  // ✅ Updated, more reliable prompt
+  const prompt = `
+Return ONLY a valid JSON array (no markdown, no code fences) of official NCERT chapter titles
+for Class ${selectedClass}, Subject ${subject}.
+Each entry must be the full chapter title string, e.g.:
+["Chapter 1: Matter in Our Surroundings", "Chapter 2: Is Matter Around Us Pure", ...]
+`;
 
   try {
-    const text = await askGemini(prompt);
+    const text = await askGeminiWithRetry(prompt);
     const chapters = extractArrayFromText(text);
 
     if (!chapters || !chapters.length) throw new Error("No chapters found in response");
@@ -308,4 +315,20 @@ async function updateCurriculum(chapterTitle, newId) {
   } catch (err) {
     log(`❌ Failed to update curriculum.js: ${err.message}`);
   }
+}
+
+// ------------- ✅ Enhanced Retry for Chapter Fetch -------------
+async function askGeminiWithRetry(prompt) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const text = await askGemini(prompt);
+      if (text && text.length > 5) return text;
+      log(`⚠️ Empty Gemini response (attempt ${attempt}) — retrying...`);
+      await new Promise(r => setTimeout(r, 1200));
+    } catch (e) {
+      log(`⚠️ Gemini API error (attempt ${attempt}): ${e.message}`);
+      if (attempt === 2) throw new Error("Gemini failed twice consecutively");
+    }
+  }
+  throw new Error("No valid response from Gemini after retry");
 }
