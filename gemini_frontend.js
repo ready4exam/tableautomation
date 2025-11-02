@@ -5,7 +5,7 @@
 
 import { supabase } from './supabaseClient.js';
 
-const GEMINI_API_KEY = "AIzaSyBX5TYNhyMR9S8AODdFkfsJW-vSbVZVI5Y"; // 🔑 Replace with your Gemini API key
+const GEMINI_API_KEY = "AIzaSyBX5TYNhyMR9S8AODdFkfsJW-vSbVZVI5Y";
 const GEMINI_MODEL = "gemini-2.5-flash";
 
 const classSelect = document.getElementById('classSelect');
@@ -27,17 +27,13 @@ const log = (msg) => {
 async function askGemini(prompt) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
-  const body = {
-    contents: [
-      { role: "user", parts: [{ text: prompt }] }
-    ]
-  };
+  const body = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
 
   try {
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
     });
 
     if (!res.ok) {
@@ -63,10 +59,7 @@ function extractArrayFromText(text) {
   try {
     const match = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
     if (match) {
-      const candidate = match[0]
-        .replace(/```(?:json)?/gi, "")
-        .replace(/```/g, "")
-        .trim();
+      const candidate = match[0].replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
       const parsed = JSON.parse(candidate);
 
       if (Array.isArray(parsed)) return parsed;
@@ -94,9 +87,7 @@ function parseCSV(csv) {
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith("#"));
 
-  const headers = lines[0]
-    .split(",")
-    .map((h) => h.trim().replace(/^"|"$/g, ""));
+  const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
   const rows = lines.slice(1).map((line) => {
     const cols = line.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map((v) =>
       v.trim().replace(/^"|"$/g, "")
@@ -182,18 +173,23 @@ generateBtn.addEventListener("click", async () => {
   const chapter = chapterSelect.value;
   if (!chapter) return alert("Please select a chapter first.");
 
-  // ✅ Clean chapter name to avoid "Chapter 7" prefix in table names
-  const cleanedChapter = chapter
-    .replace(/^Chapter\s*\d*[:.\-]?\s*/i, "")
-    .trim();
-
+  // ✅ Improved table naming logic
   const tableName = (() => {
-    let clean = cleanedChapter
+    let cleanTitle = chapter
       .toLowerCase()
-      .replace(/[:;.,!?'"()]/g, "")
-      .replace(/\s+/g, "_")
+      .replace(/chapter\s*\d+[:\-]?\s*/i, "")
+      .replace(/[^a-z\s]/g, "")
       .trim();
-    return clean.endsWith("_quiz") ? clean : `${clean}_quiz`;
+
+    let words = cleanTitle
+      .split(/\s+/)
+      .filter(
+        (w) =>
+          w && !["the", "a", "an", "of", "in", "on", "and", "for", "to"].includes(w)
+      );
+
+    let baseName = words.length === 1 ? words[0] : words.slice(0, 2).join("_");
+    return `${baseName}_quiz`;
   })();
 
   log(`🧾 Preparing table: ${tableName}`);
@@ -271,26 +267,8 @@ Distribution:
     const csvText = await askGemini(prompt);
     log("✅ CSV received. Parsing...");
     const rows = parseCSV(csvText);
-
-    // ✅ Enforce column consistency for Supabase
-    const expectedColumns = [
-      "difficulty",
-      "question_type",
-      "question_text",
-      "scenario_reason_text",
-      "option_a",
-      "option_b",
-      "option_c",
-      "option_d",
-      "correct_answer_key"
-    ];
-    rows.forEach((r) => {
-      expectedColumns.forEach(col => {
-        if (!(col in r)) r[col] = "";
-      });
-    });
-
     log(`📤 Uploading ${rows.length} rows to Supabase...`);
+
     const { error: insertError } = await supabase.from(tableName).insert(rows);
     if (insertError) throw insertError;
     log(`🎉 Successfully inserted ${rows.length} questions into ${tableName}.`);
@@ -301,7 +279,7 @@ Distribution:
   }
 });
 
-// ------------- Update curriculum.js (after successful insert) -------------
+// ------------- ✅ Enhanced Curriculum Updater -------------
 async function updateCurriculum(chapterTitle, newId) {
   const CURRICULUM_URL =
     "https://raw.githubusercontent.com/ready4exam/ninth/main/js/curriculum.js";
@@ -311,9 +289,12 @@ async function updateCurriculum(chapterTitle, newId) {
     const res = await fetch(CURRICULUM_URL);
     let text = await res.text();
 
-    const safeTitle = chapterTitle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const safeTitle = chapterTitle
+      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+      .replace(/chapter\s*\d+[:\-]?\s*/i, "(?:Chapter\\s*\\d+[:\\-]?\\s*)?");
+
     const regex = new RegExp(
-      `\\{\\s*id:\\s*"(.*?)",\\s*title:\\s*"(?:Chapter\\s*\\d+:\\s*)?${safeTitle}"\\s*\\}`,
+      `\\{\\s*id:\\s*"(.*?)",\\s*title:\\s*"${safeTitle}"\\s*\\}`,
       "gi"
     );
 
@@ -342,7 +323,7 @@ async function askGeminiWithRetry(prompt) {
       const text = await askGemini(prompt);
       if (text && text.length > 5) return text;
       log(`⚠️ Empty Gemini response (attempt ${attempt}) — retrying...`);
-      await new Promise(r => setTimeout(r, 1200));
+      await new Promise((r) => setTimeout(r, 1200));
     } catch (e) {
       log(`⚠️ Gemini API error (attempt ${attempt}): ${e.message}`);
       if (attempt === 2) throw new Error("Gemini failed twice consecutively");
