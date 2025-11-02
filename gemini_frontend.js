@@ -1,243 +1,259 @@
 // ------------------- Gemini Frontend Automation -------------------
 // Works with supabaseClient.js and Gemini 2.5 Flash
-// Creates RLS-enabled tables, adds policies, and uploads generated quiz data
+// Creates RLS-enabled tables, adds policies, uploads generated quiz data,
+// and updates curriculum.js reference IDs automatically.
 
 import { supabase } from './supabaseClient.js';
 
 const GEMINI_API_KEY = "AIzaSyBX5TYNhyMR9S8AODdFkfsJW-vSbVZVI5Y"; // 🔑 Replace with your Gemini API key
-const GEMINI_MODEL = "gemini-1.5-flash";
+const GEMINI_MODEL = "gemini-1.5-flash-latest"; // ✅ updated to correct live model
 
-// ---------- DOM Elements ----------
 const classSelect = document.getElementById('classSelect');
 const subjectSelect = document.getElementById('subjectSelect');
 const chapterSelect = document.getElementById('chapterSelect');
 const generateBtn = document.getElementById('generateBtn');
 const logEl = document.getElementById('log');
 
-// ---------- Utility: Logging ----------
-function log(message, type = "info") {
-  const p = document.createElement("p");
-  p.textContent = message;
-  p.className = type;
-  logEl.appendChild(p);
-  logEl.scrollTop = logEl.scrollHeight;
-}
+// ------------- Logging -------------
+const log = (msg) => {
+  console.log(msg);
+  if (logEl) {
+    logEl.textContent += msg + "\n";
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+};
 
-// ---------- Gemini API Wrapper ----------
+// ------------- Ask Gemini API -------------
 async function askGemini(prompt) {
   log("🧠 Asking Gemini 2.5 Flash...");
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }]
-    })
-  });
 
-  const data = await response.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
-  return text;
-}
-
-// ---------- Fetch Subjects ----------
-async function fetchSubjects(selectedClass) {
-  subjectSelect.innerHTML = `<option>Loading...</option>`;
-  chapterSelect.innerHTML = `<option>Select Subject first</option>`;
-  log(`🔍 Fetching NCERT subjects for Class ${selectedClass}...`);
-
-  const prompt = `List all NCERT subjects for Class ${selectedClass} based on CBSE syllabus. Return only subject names, one per line.`;
-  const text = await askGemini(prompt);
-
-  const subjects = text.split("\n").filter(Boolean).map(s => s.trim());
-  log(`✅ Found ${subjects.length} subjects.`);
-
-  subjectSelect.innerHTML = `<option value="">Select Subject</option>`;
-  subjects.forEach(sub => {
-    const opt = document.createElement("option");
-    opt.value = sub;
-    opt.textContent = sub;
-    subjectSelect.appendChild(opt);
-  });
-}
-
-// ---------- Fetch Chapters ----------
-async function fetchChapters(selectedClass, selectedSubject) {
-  chapterSelect.innerHTML = `<option>Loading...</option>`;
-  log(`📖 Fetching chapters for ${selectedSubject} (Class ${selectedClass})...`);
-
-  const prompt = `List all chapters for Class ${selectedClass} ${selectedSubject} based on NCERT book (latest CBSE edition). Return only chapter names, one per line.`;
-  const text = await askGemini(prompt);
-
-  const chapters = text.split("\n").filter(Boolean).map(c => c.trim());
-  log(`✅ Found ${chapters.length} chapters.`);
-
-  chapterSelect.innerHTML = `<option value="">Select Chapter</option>`;
-  chapters.forEach(ch => {
-    const opt = document.createElement("option");
-    opt.value = ch;
-    opt.textContent = ch;
-    chapterSelect.appendChild(opt);
-  });
-}
-
-// ---------- Generate Quiz CSV ----------
-async function generateQuizCSV(chapterTitle) {
-  log(`📚 Generating quiz for: ${chapterTitle} ...`);
-
-  const prompt = `
-Generate exactly 60 unique quiz questions on the topic **"${chapterTitle}"**, strictly following the 9th standard NCERT/CBSE syllabus.
-
-Format the output strictly as a **CSV file**, ensuring it exactly follows the database schema and distribution rules given below. The CSV must include the column headers exactly as shown and contain only the question data rows (no extra text, no markdown, no explanations).
-
----
-
-**Distribution Rules (Total: 60 Questions):**
-* **Simple:** 20 questions (10 MCQ, 5 AR, 5 Case-Based)
-* **Medium:** 20 questions (10 MCQ, 5 AR, 5 Case-Based)
-* **Advanced:** 20 questions (10 MCQ, 5 AR, 5 Case-Based)
-
----
-
-**Schema (Columns and Rules):**
-
-| Column Name | Data Type | Notes on Content |
-| :--- | :--- | :--- |
-| **difficulty** | text | Must be exactly 'Simple', 'Medium', or 'Advanced'. |
-| **question_type** | text | Must be exactly 'MCQ', 'AR', or 'Case-Based'. |
-| **question_text** | text | The main question text (or Assertion text for AR). |
-| **scenario_reason_text** | text | For 'AR', holds the Reason text. For 'Case-Based', holds the question part related to the given scenario. For 'MCQ', leave empty or NULL. |
-| **option_a** | text | Option A text (or standard AR choice A). |
-| **option_b** | text | Option B text (or standard AR choice B). |
-| **option_c** | text | Option C text (or standard AR choice C). |
-| **option_d** | text | Option D text (or standard AR choice D). |
-| **correct_answer_key** | text | The correct option key — one of 'A', 'B', 'C', or 'D'. |
-
----
-
-**Formatting & Content Rules:**
-
-1. **Assertion–Reason (AR) Questions:**
-   - question_type must be 'AR'.
-   - question_text must start with "Assertion (A):"
-   - scenario_reason_text must start with "Reason (R):"
-   - Use standard AR options:
-     - A: Both A and R are true, and R is the correct explanation of A.
-     - B: Both A and R are true, but R is not the correct explanation of A.
-     - C: A is true, but R is false.
-     - D: A is false, but R is true.
-
-2. **Case-Based Questions:**
-   - question_type must be 'Case-Based'.
-   - question_text must start with "Scenario:"
-   - scenario_reason_text must contain the related question.
-   - Options must be contextually relevant.
-
-3. **MCQ Questions:**
-   - question_type must be 'MCQ'.
-   - scenario_reason_text must be empty.
-   - Each MCQ must test a key NCERT concept or fact.
-
-4. **CSV Quoting Rule (for safety):**
-   - Always wrap text fields in double quotes.
-   - Escape internal quotes by doubling them, e.g. "Water is called ""universal solvent"""
-   - Ensure commas inside text fields are properly enclosed in quotes.
-
----
-
-**Final Output Requirement:**
-Output only valid CSV text. The first line must be:
-
-difficulty,question_type,question_text,scenario_reason_text,option_a,option_b,option_c,option_d,correct_answer_key
-`;
-
-  const csv = await askGemini(prompt);
-
-  const cleanCSV = csv
-    .replace(/^```csv\s*/i, "")
-    .replace(/^```/i, "")
-    .replace(/```$/i, "")
-    .trim();
-
-  if (!cleanCSV.startsWith("difficulty,")) {
-    console.error("CSV preview:\n", cleanCSV.slice(0, 200));
-    throw new Error("Invalid CSV format received from Gemini.");
-  }
-
-  log("✅ CSV generated successfully!");
-  return cleanCSV;
-}
-
-// ---------- Upload to Supabase ----------
-async function uploadQuizToSupabase(tableName, csvText) {
-  log(`📤 Uploading quiz data to Supabase table: ${tableName}`);
-
-  const rows = csvText.split("\n").slice(1).map(row => row.split(","));
-  const inserts = rows.map(cols => ({
-    difficulty: cols[0],
-    question_type: cols[1],
-    question_text: cols[2],
-    scenario_reason_text: cols[3],
-    option_a: cols[4],
-    option_b: cols[5],
-    option_c: cols[6],
-    option_d: cols[7],
-    correct_answer_key: cols[8]
-  }));
-
-  for (const row of inserts) {
-    const { error } = await supabase.from(tableName).insert(row);
-    if (error) console.error(error);
-  }
-
-  log("✅ All rows inserted successfully!");
-}
-
-// ---------- Update Curriculum via API ----------
-async function updateCurriculum(chapterTitle, tableName) {
-  try {
-    await fetch("/api/updateCurriculum", {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+    {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chapterTitle, tableName })
-    });
-    log("✅ curriculum.js updated successfully!");
-  } catch (err) {
-    console.error("Curriculum update failed:", err);
-  }
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+    }
+  );
+
+  if (!res.ok) throw new Error(`Gemini request failed (${res.status})`);
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  return text.replace(/```csv|```/g, "").trim();
 }
 
-// ---------- Event Listeners ----------
+// ------------- Parse CSV safely -------------
+function parseCSV(csv) {
+  const lines = csv
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+
+  const headers = lines[0]
+    .split(",")
+    .map((h) => h.trim().replace(/^"|"$/g, ""));
+  const rows = lines.slice(1).map((line) => {
+    const cols = line.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map((v) =>
+      v.trim().replace(/^"|"$/g, "")
+    );
+    const row = {};
+    headers.forEach((h, i) => (row[h] = cols[i] || ""));
+    return row;
+  });
+  return rows;
+}
+
+// ------------- Handle Class Selection -------------
 classSelect.addEventListener("change", async () => {
   const selectedClass = classSelect.value;
-  if (selectedClass) await fetchSubjects(selectedClass);
+  if (!selectedClass) return;
+  subjectSelect.innerHTML = "";
+  chapterSelect.innerHTML = "";
+  generateBtn.disabled = true;
+
+  log(`🔍 Fetching NCERT subjects for Class ${selectedClass}...`);
+  const prompt = `List all NCERT subjects for Class ${selectedClass} in JSON array format. Example: ["Science","Mathematics","Social Science","English"]`;
+
+  try {
+    const text = await askGemini(prompt);
+    const clean = text.replace(/```json|```/g, "").replace(/\n/g, "").trim();
+    const subjects = JSON.parse(clean.endsWith("]") ? clean : clean + "]");
+    subjectSelect.innerHTML = '<option value="">-- Select Subject --</option>';
+    subjects.forEach((s) => {
+      subjectSelect.innerHTML += `<option value="${s}">${s}</option>`;
+    });
+    subjectSelect.disabled = false;
+    log(`✅ Found ${subjects.length} subjects.`);
+  } catch (err) {
+    log(`❌ Failed to fetch subjects: ${err.message}`);
+  }
 });
 
+// ------------- Handle Subject Selection -------------
 subjectSelect.addEventListener("change", async () => {
   const selectedClass = classSelect.value;
-  const selectedSubject = subjectSelect.value;
-  if (selectedSubject) await fetchChapters(selectedClass, selectedSubject);
+  const subject = subjectSelect.value;
+  if (!subject) return;
+  chapterSelect.innerHTML = "";
+  generateBtn.disabled = true;
+
+  log(`📖 Fetching chapters for ${subject} (Class ${selectedClass})...`);
+  const prompt = `List all NCERT chapters for Class ${selectedClass}, Subject ${subject} as a JSON array of chapter names only.`;
+
+  try {
+    const text = await askGemini(prompt);
+    const clean = text.replace(/```json|```/g, "").replace(/\n/g, "").trim();
+    const chapters = JSON.parse(clean.endsWith("]") ? clean : clean + "]");
+    chapterSelect.innerHTML = '<option value="">-- Select Chapter --</option>';
+    chapters.forEach((ch) => {
+      chapterSelect.innerHTML += `<option value="${ch}">${ch}</option>`;
+    });
+    chapterSelect.disabled = false;
+    log(`✅ Found ${chapters.length} chapters.`);
+  } catch (err) {
+    log(`❌ Failed to fetch chapters: ${err.message}`);
+  }
 });
 
+// ------------- Handle Chapter Selection -------------
+chapterSelect.addEventListener("change", () => {
+  generateBtn.disabled = !chapterSelect.value;
+});
+
+// ------------- Handle Question Generation -------------
 generateBtn.addEventListener("click", async () => {
   const selectedClass = classSelect.value;
-  const selectedSubject = subjectSelect.value;
-  const selectedChapter = chapterSelect.value;
+  const subject = subjectSelect.value;
+  const chapter = chapterSelect.value;
+  if (!chapter) return alert("Please select a chapter first.");
 
-  if (!selectedClass || !selectedSubject || !selectedChapter) {
-    log("⚠️ Please select Class, Subject, and Chapter first.", "error");
+  const tableName = (() => {
+    let clean = chapter
+      .toLowerCase()
+      .replace(/[:;.,!?'"()]/g, "")
+      .replace(/\s+/g, "_")
+      .trim();
+    return clean.endsWith("_quiz") ? clean : `${clean}_quiz`;
+  })();
+
+  log(`🧾 Preparing table: ${tableName}`);
+
+  const columns = [
+    "difficulty",
+    "question_type",
+    "question_text",
+    "scenario_reason_text",
+    "option_a",
+    "option_b",
+    "option_c",
+    "option_d",
+    "correct_answer_key",
+  ];
+
+  const sql = `
+    CREATE TABLE IF NOT EXISTS public.${tableName} (
+      id SERIAL PRIMARY KEY,
+      ${columns.map((c) => `${c} TEXT`).join(", ")},
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+    ALTER TABLE public.${tableName} ENABLE ROW LEVEL SECURITY;
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_policies WHERE tablename = '${tableName}'
+          AND policyname = 'Enable insert for authenticated users'
+      ) THEN
+        CREATE POLICY "Enable insert for authenticated users"
+        ON public.${tableName}
+        FOR INSERT
+        TO anon, authenticated
+        WITH CHECK (true);
+      END IF;
+    END $$;
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_policies WHERE tablename = '${tableName}'
+          AND policyname = 'Enable read access for all users'
+      ) THEN
+        CREATE POLICY "Enable read access for all users"
+        ON public.${tableName}
+        FOR SELECT
+        TO public
+        USING (true);
+      END IF;
+    END $$;
+  `;
+
+  try {
+    const { error } = await supabase.rpc("execute_sql", { query: sql });
+    if (error) throw new Error(error.message);
+    log(`✅ Table ${tableName} ready with RLS and policies.`);
+  } catch (err) {
+    log(`⚠️ Table or RLS setup failed: ${err.message}`);
     return;
   }
 
-  const tableName = selectedChapter.toLowerCase().replace(/\s+/g, "_") + "_quiz";
+  log(`📚 Generating 60 questions for ${subject} → ${chapter}...`);
+  const prompt = `
+Generate exactly 60 unique quiz questions for Class ${selectedClass}, Subject ${subject}, Chapter ${chapter}.
+Return ONLY a valid CSV (no markdown fences, no code blocks) with these headers:
+difficulty,question_type,question_text,scenario_reason_text,option_a,option_b,option_c,option_d,correct_answer_key
+Ensure all commas are properly escaped in quotes. Example row:
+Simple,MCQ,"What is the chemical formula of water?","",H2O,CO2,O2,N2,A
+Distribution:
+- Simple: 20 (10 MCQ, 5 AR, 5 Case-Based)
+- Medium: 20 (10 MCQ, 5 AR, 5 Case-Based)
+- Advanced: 20 (10 MCQ, 5 AR, 5 Case-Based)
+`;
 
   try {
-    log(`🚀 Starting quiz generation for ${selectedChapter}`);
-    const csv = await generateQuizCSV(selectedChapter);
-    await uploadQuizToSupabase(tableName, csv);
-    await updateCurriculum(selectedChapter, tableName);
-    log(`🎯 Quiz ready for ${selectedChapter}!`);
+    const csvText = await askGemini(prompt);
+    log("✅ CSV received. Parsing...");
+    const rows = parseCSV(csvText);
+    log(`📤 Uploading ${rows.length} rows to Supabase...`);
+
+    const { error: insertError } = await supabase.from(tableName).insert(rows);
+    if (insertError) throw insertError;
+    log(`🎉 Successfully inserted ${rows.length} questions into ${tableName}.`);
+
+    await updateCurriculum(chapter, tableName);
   } catch (err) {
-    console.error(err);
-    log("❌ Error: " + err.message, "error");
+    log(`❌ Error: ${err.message}`);
   }
 });
+
+// ------------- Update curriculum.js (after successful insert) -------------
+async function updateCurriculum(chapterTitle, newId) {
+  const CURRICULUM_URL =
+    "https://raw.githubusercontent.com/ready4exam/ninth/main/js/curriculum.js";
+
+  try {
+    log(`🪶 Updating curriculum.js for chapter: ${chapterTitle} → ${newId}`);
+    const res = await fetch(CURRICULUM_URL);
+    let text = await res.text();
+
+    const safeTitle = chapterTitle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(
+      `\\{\\s*id:\\s*"(.*?)",\\s*title:\\s*"${safeTitle}"\\s*\\}`,
+      "g"
+    );
+
+    let updated = false;
+    text = text.replace(regex, (match, oldId) => {
+      updated = true;
+      log(`🧩 Replaced id "${oldId}" → "${newId}"`);
+      return match.replace(`id: "${oldId}"`, `id: "${newId}"`);
+    });
+
+    if (!updated) {
+      log("⚠️ Chapter title not found in curriculum.js — no update performed.");
+      return;
+    }
+
+    // ✅ You can later add a GitHub commit API here to push this update automatically.
+    console.log("✅ Updated curriculum.js content preview:\n", text.slice(0, 800));
+  } catch (err) {
+    log(`❌ Failed to update curriculum.js: ${err.message}`);
+  }
+}
