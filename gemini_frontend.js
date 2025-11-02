@@ -3,10 +3,9 @@
 // Creates RLS-enabled tables, adds policies, and uploads generated quiz data
 
 import { supabase } from './supabaseClient.js';
-// ✅ Load Papa Parse as a global script
-await import("https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js");
-const Papa = window.Papa;
-
+// Replace the global script loading with a direct ES Module import
+import Papa from 'https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.esm.js'; 
+// Note the change from papaparse.min.js to papaparse.esm.js for module support.
 
 // ✅ Added Papa Parse import
 
