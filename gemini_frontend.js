@@ -41,6 +41,49 @@ async function askGemini(prompt) {
   return text.replace(/```csv|```/g, "").trim();
 }
 
+// ------------- Robust Text → Array extractor -------------
+function extractArrayFromText(text) {
+  if (!text || typeof text !== "string") return [];
+
+  // Remove common fences and trim
+  let s = text.replace(/```(?:json|csv)?/gi, "").replace(/```/g, "").trim();
+
+  // Remove leading 'json:', 'JSON:', 'Output:' etc.
+  s = s.replace(/^[^\[\{]*?(?=(\[|{|$))/i, "").trim();
+
+  // If there's an explicit JSON array anywhere, try to extract it:
+  const firstBracket = s.indexOf("[");
+  const lastBracket = s.lastIndexOf("]");
+  if (firstBracket !== -1 && lastBracket > firstBracket) {
+    const arrText = s.slice(firstBracket, lastBracket + 1);
+    try {
+      const parsed = JSON.parse(arrText);
+      if (Array.isArray(parsed)) return parsed;
+    } catch (e) {
+      console.warn("JSON.parse failed on extracted array:", e);
+    }
+  }
+
+  // Normalize separators to newlines
+  s = s.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+
+  const lines = s.split("\n").map(l => l.trim()).filter(Boolean);
+  if (lines.length > 1) return lines;
+
+  // Try comma-separated (ignore commas inside quotes)
+  const cols = s
+    .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
+    .map(c => c.trim().replace(/^"|"$/g, ""))
+    .filter(Boolean);
+  if (cols.length > 0) return cols;
+
+  // Fallback: match quoted parts
+  const quoted = Array.from(s.matchAll(/"([^"]+)"/g)).map(m => m[1]);
+  if (quoted.length) return quoted;
+
+  return [];
+}
+
 // ------------- Parse CSV safely -------------
 function parseCSV(csv) {
   const lines = csv
@@ -75,15 +118,11 @@ classSelect.addEventListener("change", async () => {
 
   try {
     const text = await askGemini(prompt);
-    // ✅ Fix: Safely clean "json" or extra text before parsing
-    const clean = text
-      .replace(/```json|```/g, "")
-      .replace(/^[^{[]*json[:\s-]*/i, "")
-      .replace(/\n/g, "")
-      .trim();
+    const subjects = extractArrayFromText(text);
 
-    const jsonString = clean.endsWith("]") ? clean : clean + "]";
-    const subjects = JSON.parse(jsonString);
+    if (!subjects || !subjects.length) {
+      throw new Error("No subjects found in response");
+    }
 
     subjectSelect.innerHTML = '<option value="">-- Select Subject --</option>';
     subjects.forEach((s) => {
@@ -109,15 +148,11 @@ subjectSelect.addEventListener("change", async () => {
 
   try {
     const text = await askGemini(prompt);
-    // ✅ Fix: Same cleanup for chapters
-    const clean = text
-      .replace(/```json|```/g, "")
-      .replace(/^[^{[]*json[:\s-]*/i, "")
-      .replace(/\n/g, "")
-      .trim();
+    const chapters = extractArrayFromText(text);
 
-    const jsonString = clean.endsWith("]") ? clean : clean + "]";
-    const chapters = JSON.parse(jsonString);
+    if (!chapters || !chapters.length) {
+      throw new Error("No chapters found in response");
+    }
 
     chapterSelect.innerHTML = '<option value="">-- Select Chapter --</option>';
     chapters.forEach((ch) => {
@@ -248,10 +283,7 @@ async function updateCurriculum(chapterTitle, newId) {
     const res = await fetch(CURRICULUM_URL);
     let text = await res.text();
 
-    // Escape special regex chars in chapterTitle
     const safeTitle = chapterTitle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-    // 🧠 Match even if curriculum title includes "Chapter X:" prefix
     const regex = new RegExp(
       `\\{\\s*id:\\s*"(.*?)",\\s*title:\\s*"(?:Chapter\\s*\\d+:\\s*)?${safeTitle}"\\s*\\}`,
       "gi"
@@ -269,9 +301,7 @@ async function updateCurriculum(chapterTitle, newId) {
       return;
     }
 
-    // Optional: preview first 800 chars of modified file
     console.log("✅ Updated curriculum.js content preview:\n", text.slice(0, 800));
-
   } catch (err) {
     log(`❌ Failed to update curriculum.js: ${err.message}`);
   }
