@@ -102,11 +102,20 @@ difficulty,question_type,question_text,scenario_reason_text,option_a,option_b,op
   });
 
   const data = await response.json();
-  const csv = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+ let csv = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
-  if (!csv.startsWith("difficulty,")) {
-    throw new Error("Invalid CSV format received from Gemini.");
-  }
+// 🧹 Clean Gemini Markdown fences if present
+csv = csv
+  .replace(/^```csv\s*/i, "") // remove starting ```csv
+  .replace(/^```/i, "")       // or just ```
+  .replace(/```$/i, "")       // remove trailing ```
+  .trim();
+
+// 🧩 Validate
+if (!csv.startsWith("difficulty,")) {
+  console.error("CSV output preview:\n", csv.slice(0, 300));
+  throw new Error("Invalid CSV format received from Gemini (missing headers).");
+}
 
   log("✅ CSV generated successfully!");
   return csv.trim();
