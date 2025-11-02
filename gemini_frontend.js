@@ -29,10 +29,7 @@ async function askGemini(prompt) {
 
   const body = {
     contents: [
-      {
-        role: "user",
-        parts: [{ text: prompt }]
-      }
+      { role: "user", parts: [{ text: prompt }] }
     ]
   };
 
@@ -50,60 +47,49 @@ async function askGemini(prompt) {
 
     const data = await res.json();
     const output = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-
     if (!output) throw new Error("Empty response from Gemini");
 
-    // ✅ Extract JSON block even if wrapped in text or markdown
-    const match = output.match(/\[[\s\S]*\]/);
-    if (match) {
-      try {
-        return JSON.parse(match[0]);
-      } catch (err) {
-        console.warn("⚠️ Invalid JSON inside Gemini output:", err);
-      }
-    }
-
-    // Return raw text if no valid JSON found
     return output;
   } catch (err) {
     console.error("❌ Gemini API error:", err);
     throw err;
   }
 }
-// ------------- Robust Text → Array extractor -------------
+
+// ------------- Universal JSON / Array Extractor -------------
 function extractArrayFromText(text) {
   if (!text || typeof text !== "string") return [];
 
   try {
-    // Remove markdown fences and stray labels
-    const cleaned = text
-      .replace(/```(?:json)?/gi, "")
-      .replace(/```/g, "")
-      .replace(/^.*?(?=\[)/s, "") // drop everything before the first “[”
-      .replace(/(?<=\])[\s\S]*$/, "") // drop everything after the last “]”
-      .trim();
-
-    // Replace smart quotes with plain quotes
-    const normalized = cleaned.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
-
-    // Parse and validate array
-    const parsed = JSON.parse(normalized);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (err) {
-    console.warn("⚠️ Fallback: could not parse JSON array, using regex scan");
-    const match = text.match(/\[[\s\S]*\]/);
+    // Try to find any JSON block in text
+    const match = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
     if (match) {
-      try {
-        const parsed = JSON.parse(match[0]);
-        return Array.isArray(parsed) ? parsed : [];
-      } catch {
-        return [];
-      }
-    }
-    return [];
-  }
-}
+      const candidate = match[0]
+        .replace(/```(?:json)?/gi, "")
+        .replace(/```/g, "")
+        .trim();
+      const parsed = JSON.parse(candidate);
 
+      // Handle { "subjects": [...] } or { "chapters": [...] }
+      if (Array.isArray(parsed)) return parsed;
+      if (parsed.subjects && Array.isArray(parsed.subjects)) return parsed.subjects;
+      if (parsed.chapters && Array.isArray(parsed.chapters)) return parsed.chapters;
+      if (parsed.data && Array.isArray(parsed.data)) return parsed.data;
+    }
+  } catch (e) {
+    console.warn("⚠️ JSON parse failed:", e);
+  }
+
+  // Try extracting quoted list manually
+  const quoted = Array.from(text.matchAll(/"([^"]+)"/g)).map(m => m[1]);
+  if (quoted.length) return quoted;
+
+  // Fallback: comma-separated
+  const parts = text.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
+  if (parts.length) return parts;
+
+  return [];
+}
 
 // ------------- Parse CSV safely -------------
 function parseCSV(csv) {
@@ -135,15 +121,13 @@ classSelect.addEventListener("change", async () => {
   generateBtn.disabled = true;
 
   log(`🔍 Fetching NCERT subjects for Class ${selectedClass}...`);
-  const prompt = `List all NCERT subjects for Class ${selectedClass} in JSON array format. Example: ["Science","Mathematics","Social Science","English"]`;
+  const prompt = `List all NCERT subjects for Class ${selectedClass} in pure JSON array format like ["Science","Mathematics","Social Science","English","Hindi","Sanskrit"].`;
 
   try {
     const text = await askGemini(prompt);
     const subjects = extractArrayFromText(text);
 
-    if (!subjects || !subjects.length) {
-      throw new Error("No subjects found in response");
-    }
+    if (!subjects || !subjects.length) throw new Error("No subjects found in response");
 
     subjectSelect.innerHTML = '<option value="">-- Select Subject --</option>';
     subjects.forEach((s) => {
@@ -171,9 +155,7 @@ subjectSelect.addEventListener("change", async () => {
     const text = await askGemini(prompt);
     const chapters = extractArrayFromText(text);
 
-    if (!chapters || !chapters.length) {
-      throw new Error("No chapters found in response");
-    }
+    if (!chapters || !chapters.length) throw new Error("No chapters found in response");
 
     chapterSelect.innerHTML = '<option value="">-- Select Chapter --</option>';
     chapters.forEach((ch) => {
