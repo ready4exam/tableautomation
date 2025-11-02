@@ -5,7 +5,7 @@
 
 import { supabase } from './supabaseClient.js';
 
-const GEMINI_API_KEY = "AIzaSyBX5TYNhyMR9S8AODdFkfsJW-vSbVZVI5Y";
+const GEMINI_API_KEY = "AIzaSyBX5TYNhyMR9S8AODdFkfsJW-vSbVZVI5Y"; // 🔑 Replace with your Gemini API key
 const GEMINI_MODEL = "gemini-2.5-flash";
 
 const classSelect = document.getElementById('classSelect');
@@ -27,13 +27,17 @@ const log = (msg) => {
 async function askGemini(prompt) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
-  const body = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+  const body = {
+    contents: [
+      { role: "user", parts: [{ text: prompt }] }
+    ]
+  };
 
   try {
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify(body)
     });
 
     if (!res.ok) {
@@ -57,11 +61,16 @@ function extractArrayFromText(text) {
   if (!text || typeof text !== "string") return [];
 
   try {
+    // Try to find any JSON block in text
     const match = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
     if (match) {
-      const candidate = match[0].replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
+      const candidate = match[0]
+        .replace(/```(?:json)?/gi, "")
+        .replace(/```/g, "")
+        .trim();
       const parsed = JSON.parse(candidate);
 
+      // Handle { "subjects": [...] } or { "chapters": [...] }
       if (Array.isArray(parsed)) return parsed;
       if (parsed.subjects && Array.isArray(parsed.subjects)) return parsed.subjects;
       if (parsed.chapters && Array.isArray(parsed.chapters)) return parsed.chapters;
@@ -71,9 +80,11 @@ function extractArrayFromText(text) {
     console.warn("⚠️ JSON parse failed:", e);
   }
 
+  // Try extracting quoted list manually
   const quoted = Array.from(text.matchAll(/"([^"]+)"/g)).map(m => m[1]);
   if (quoted.length) return quoted;
 
+  // Fallback: comma-separated
   const parts = text.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
   if (parts.length) return parts;
 
@@ -87,7 +98,9 @@ function parseCSV(csv) {
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith("#"));
 
-  const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
+  const headers = lines[0]
+    .split(",")
+    .map((h) => h.trim().replace(/^"|"$/g, ""));
   const rows = lines.slice(1).map((line) => {
     const cols = line.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map((v) =>
       v.trim().replace(/^"|"$/g, "")
@@ -173,23 +186,20 @@ generateBtn.addEventListener("click", async () => {
   const chapter = chapterSelect.value;
   if (!chapter) return alert("Please select a chapter first.");
 
-  // ✅ Improved table naming logic
   const tableName = (() => {
-    let cleanTitle = chapter
+    // Convert to lowercase and replace punctuation/spaces
+    let clean = chapter
       .toLowerCase()
-      .replace(/chapter\s*\d+[:\-]?\s*/i, "")
-      .replace(/[^a-z\s]/g, "")
+      .replace(/chapter\s*\d+[:\-]?\s*/i, "") // remove Chapter X:
+      .replace(/[:;.,!?'"()]/g, "")
+      .replace(/\s+/g, "_")
       .trim();
 
-    let words = cleanTitle
-      .split(/\s+/)
-      .filter(
-        (w) =>
-          w && !["the", "a", "an", "of", "in", "on", "and", "for", "to"].includes(w)
-      );
+    // Simplify for multi-word chapters → only first 2 words
+    const words = clean.split("_").filter(Boolean);
+    if (words.length > 1) clean = words.slice(0, 2).join("_");
 
-    let baseName = words.length === 1 ? words[0] : words.slice(0, 2).join("_");
-    return `${baseName}_quiz`;
+    return clean.endsWith("_quiz") ? clean : `${clean}_quiz`;
   })();
 
   log(`🧾 Preparing table: ${tableName}`);
@@ -279,7 +289,23 @@ Distribution:
   }
 });
 
-// ------------- ✅ Enhanced Curriculum Updater -------------
+// ------------- ✅ Enhanced Retry for Chapter Fetch -------------
+async function askGeminiWithRetry(prompt) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const text = await askGemini(prompt);
+      if (text && text.length > 5) return text;
+      log(`⚠️ Empty Gemini response (attempt ${attempt}) — retrying...`);
+      await new Promise(r => setTimeout(r, 1200));
+    } catch (e) {
+      log(`⚠️ Gemini API error (attempt ${attempt}): ${e.message}`);
+      if (attempt === 2) throw new Error("Gemini failed twice consecutively");
+    }
+  }
+  throw new Error("No valid response from Gemini after retry");
+}
+
+// ------------- ✅ Improved Curriculum.js Update -------------
 async function updateCurriculum(chapterTitle, newId) {
   const CURRICULUM_URL =
     "https://raw.githubusercontent.com/ready4exam/ninth/main/js/curriculum.js";
@@ -287,15 +313,17 @@ async function updateCurriculum(chapterTitle, newId) {
   try {
     log(`🪶 Updating curriculum.js for chapter: ${chapterTitle} → ${newId}`);
     const res = await fetch(CURRICULUM_URL);
+    if (!res.ok) throw new Error("Unable to fetch curriculum.js");
     let text = await res.text();
 
-    const safeTitle = chapterTitle
-      .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-      .replace(/chapter\s*\d+[:\-]?\s*/i, "(?:Chapter\\s*\\d+[:\\-]?\\s*)?");
+    const cleanTitle = chapterTitle
+      .replace(/chapter\s*\d+[:\-]?\s*/i, "")
+      .trim()
+      .toLowerCase();
 
     const regex = new RegExp(
-      `\\{\\s*id:\\s*"(.*?)",\\s*title:\\s*"${safeTitle}"\\s*\\}`,
-      "gi"
+      `id:\\s*"(.*?)"\\s*,\\s*title:\\s*"(?:Chapter\\s*\\d+[:\\-]?\\s*)?${cleanTitle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`,
+      "i"
     );
 
     let updated = false;
@@ -310,24 +338,9 @@ async function updateCurriculum(chapterTitle, newId) {
       return;
     }
 
-    console.log("✅ Updated curriculum.js content preview:\n", text.slice(0, 800));
+    console.log("✅ Updated curriculum.js preview:\n", text.slice(0, 800));
+
   } catch (err) {
     log(`❌ Failed to update curriculum.js: ${err.message}`);
   }
-}
-
-// ------------- ✅ Enhanced Retry for Chapter Fetch -------------
-async function askGeminiWithRetry(prompt) {
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
-      const text = await askGemini(prompt);
-      if (text && text.length > 5) return text;
-      log(`⚠️ Empty Gemini response (attempt ${attempt}) — retrying...`);
-      await new Promise((r) => setTimeout(r, 1200));
-    } catch (e) {
-      log(`⚠️ Gemini API error (attempt ${attempt}): ${e.message}`);
-      if (attempt === 2) throw new Error("Gemini failed twice consecutively");
-    }
-  }
-  throw new Error("No valid response from Gemini after retry");
 }
