@@ -4,10 +4,9 @@
 
 import { supabase } from './supabaseClient.js';
 
-const GEMINI_API_KEY = "AIzaSyBX5TYNhyMR9S8AODdFkfsJW-vSbVZVI5Y"; // 🔑 Replace with your Gemini API key
+const GEMINI_API_KEY = "AIzaSyBX5TYNhyMR9S8AODdFkfsJW-vSbVZVI5Y";
 const GEMINI_MODEL = "gemini-1.5-flash";
 
-// DOM Elements
 const classSelect = document.getElementById('classSelect');
 const subjectSelect = document.getElementById('subjectSelect');
 const chapterSelect = document.getElementById('chapterSelect');
@@ -23,99 +22,65 @@ function log(message, type = "info") {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
+// ---------- Utility: Basic CSV Parser ----------
+function parseCSV(text) {
+  const rows = [];
+  let current = '', insideQuotes = false;
+  const lines = text.split(/\r?\n/);
+  for (const line of lines) {
+    const row = [];
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') {
+        if (insideQuotes && line[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else {
+          insideQuotes = !insideQuotes;
+        }
+      } else if (c === ',' && !insideQuotes) {
+        row.push(current);
+        current = '';
+      } else {
+        current += c;
+      }
+    }
+    row.push(current);
+    current = '';
+    rows.push(row);
+  }
+  return rows.filter(r => r.length > 1);
+}
+
 // ---------- Gemini CSV Generation ----------
 async function generateQuizCSV(chapterTitle) {
   log(`Generating quiz for: ${chapterTitle} ...`);
 
-  const prompt = `
-Generate exactly 60 unique quiz questions on the topic **"${chapterTitle}"**, strictly following the 9th standard NCERT/CBSE syllabus.
+  const prompt = `...` // (keep your long prompt as-is)
 
-Format the output strictly as a **CSV file**, ensuring it exactly follows the database schema and distribution rules given below. The CSV must include the column headers exactly as shown and contain only the question data rows (no extra text, no markdown, no explanations).
-
----
-
-**Distribution Rules (Total: 60 Questions):**
-* **Simple:** 20 questions (10 MCQ, 5 AR, 5 Case-Based)
-* **Medium:** 20 questions (10 MCQ, 5 AR, 5 Case-Based)
-* **Advanced:** 20 questions (10 MCQ, 5 AR, 5 Case-Based)
-
----
-
-**Schema (Columns and Rules):**
-
-| Column Name | Data Type | Notes on Content |
-| :--- | :--- | :--- |
-| **difficulty** | text | Must be exactly 'Simple', 'Medium', or 'Advanced'. |
-| **question_type** | text | Must be exactly 'MCQ', 'AR', or 'Case-Based'. |
-| **question_text** | text | The main question text (or Assertion text for AR). |
-| **scenario_reason_text** | text | For 'AR', holds the Reason text. For 'Case-Based', holds the question part related to the given scenario. For 'MCQ', leave empty or NULL. |
-| **option_a** | text | Option A text (or standard AR choice A). |
-| **option_b** | text | Option B text (or standard AR choice B). |
-| **option_c** | text | Option C text (or standard AR choice C). |
-| **option_d** | text | Option D text (or standard AR choice D). |
-| **correct_answer_key** | text | The correct option key — one of 'A', 'B', 'C', or 'D'. |
-
----
-
-**Formatting & Content Rules:**
-
-1. **Assertion–Reason (AR) Questions:**
-   - question_type must be 'AR'.
-   - question_text must start with "Assertion (A):"
-   - scenario_reason_text must start with "Reason (R):"
-   - Use standard AR options:
-     - A: Both A and R are true, and R is the correct explanation of A.
-     - B: Both A and R are true, but R is not the correct explanation of A.
-     - C: A is true, but R is false.
-     - D: A is false, but R is true.
-
-2. **Case-Based Questions:**
-   - question_type must be 'Case-Based'.
-   - question_text must start with "Scenario:"
-   - scenario_reason_text must contain the related question.
-   - Options must be contextually relevant.
-
-3. **MCQ Questions:**
-   - question_type must be 'MCQ'.
-   - scenario_reason_text must be empty.
-   - Each MCQ must test a key NCERT concept or fact.
-
-4. **CSV Quoting Rule (for safety):**
-   - Always wrap text fields in double quotes.
-   - Escape internal quotes by doubling them, e.g. "Water is called ""universal solvent"""
-   - Ensure commas inside text fields are properly enclosed in quotes.
-
----
-
-**Final Output Requirement:**
-Output only valid CSV text. The first line must be:
-
-difficulty,question_type,question_text,scenario_reason_text,option_a,option_b,option_c,option_d,correct_answer_key
-`;
-
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }]
-    })
-  });
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+    }
+  );
 
   const data = await response.json();
- let csv = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  let csv = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 
-// 🧹 Clean Gemini Markdown fences if present
-csv = csv
-  .replace(/^```csv\s*/i, "") // remove starting ```csv
-  .replace(/^```/i, "")       // or just ```
-  .replace(/```$/i, "")       // remove trailing ```
-  .trim();
+  // 🧹 Clean Gemini Markdown fences
+  csv = csv
+    .replace(/^```csv\s*/i, "")
+    .replace(/^```/i, "")
+    .replace(/```$/i, "")
+    .trim();
 
-// 🧩 Validate
-if (!csv.startsWith("difficulty,")) {
-  console.error("CSV output preview:\n", csv.slice(0, 300));
-  throw new Error("Invalid CSV format received from Gemini (missing headers).");
-}
+  if (!csv.startsWith("difficulty,")) {
+    console.error("CSV output preview:\n", csv.slice(0, 300));
+    throw new Error("Invalid CSV format received from Gemini (missing headers).");
+  }
 
   log("✅ CSV generated successfully!");
   return csv.trim();
@@ -125,7 +90,7 @@ if (!csv.startsWith("difficulty,")) {
 async function uploadQuizToSupabase(tableName, csvText) {
   log(`Uploading quiz data to Supabase table: ${tableName}`);
 
-  const rows = csvText.split("\n").slice(1).map(row => row.split(","));
+  const rows = parseCSV(csvText).slice(1); // skip headers
   const inserts = rows.map(cols => ({
     difficulty: cols[0],
     question_type: cols[1],
@@ -138,15 +103,13 @@ async function uploadQuizToSupabase(tableName, csvText) {
     correct_answer_key: cols[8]
   }));
 
-  for (const row of inserts) {
-    const { error } = await supabase.from(tableName).insert(row);
-    if (error) console.error(error);
-  }
+  const { error } = await supabase.from(tableName).insert(inserts);
+  if (error) throw error;
 
   log("✅ All rows inserted successfully!");
 }
 
-// ---------- Update Curriculum via API ----------
+// ---------- Update Curriculum ----------
 async function updateCurriculum(chapterTitle, tableName) {
   try {
     await fetch("/api/updateCurriculum", {
@@ -165,6 +128,8 @@ generateBtn.addEventListener("click", async () => {
   const selectedClass = classSelect.value;
   const selectedSubject = subjectSelect.value;
   const selectedChapter = chapterSelect.value;
+  if (!selectedChapter) return log("⚠️ Please select a chapter first.");
+
   const tableName = selectedChapter.toLowerCase().replace(/\s+/g, "_") + "_quiz";
 
   try {
