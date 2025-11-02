@@ -74,44 +74,36 @@ async function askGemini(prompt) {
 function extractArrayFromText(text) {
   if (!text || typeof text !== "string") return [];
 
-  // Remove common fences and trim
-  let s = text.replace(/```(?:json|csv)?/gi, "").replace(/```/g, "").trim();
+  try {
+    // Remove markdown fences and stray labels
+    const cleaned = text
+      .replace(/```(?:json)?/gi, "")
+      .replace(/```/g, "")
+      .replace(/^.*?(?=\[)/s, "") // drop everything before the first “[”
+      .replace(/(?<=\])[\s\S]*$/, "") // drop everything after the last “]”
+      .trim();
 
-  // Remove leading 'json:', 'JSON:', 'Output:' etc.
-  s = s.replace(/^[^\[\{]*?(?=(\[|{|$))/i, "").trim();
+    // Replace smart quotes with plain quotes
+    const normalized = cleaned.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
 
-  // If there's an explicit JSON array anywhere, try to extract it:
-  const firstBracket = s.indexOf("[");
-  const lastBracket = s.lastIndexOf("]");
-  if (firstBracket !== -1 && lastBracket > firstBracket) {
-    const arrText = s.slice(firstBracket, lastBracket + 1);
-    try {
-      const parsed = JSON.parse(arrText);
-      if (Array.isArray(parsed)) return parsed;
-    } catch (e) {
-      console.warn("JSON.parse failed on extracted array:", e);
+    // Parse and validate array
+    const parsed = JSON.parse(normalized);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    console.warn("⚠️ Fallback: could not parse JSON array, using regex scan");
+    const match = text.match(/\[[\s\S]*\]/);
+    if (match) {
+      try {
+        const parsed = JSON.parse(match[0]);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
     }
+    return [];
   }
-
-  // Normalize separators to newlines
-  s = s.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
-
-  const lines = s.split("\n").map(l => l.trim()).filter(Boolean);
-  if (lines.length > 1) return lines;
-
-  // Try comma-separated (ignore commas inside quotes)
-  const cols = s
-    .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
-    .map(c => c.trim().replace(/^"|"$/g, ""))
-    .filter(Boolean);
-  if (cols.length > 0) return cols;
-
-  // Fallback: match quoted parts
-  const quoted = Array.from(s.matchAll(/"([^"]+)"/g)).map(m => m[1]);
-  if (quoted.length) return quoted;
-
-  return [];
 }
+
 
 // ------------- Parse CSV safely -------------
 function parseCSV(csv) {
