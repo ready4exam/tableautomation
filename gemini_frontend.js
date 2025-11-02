@@ -3,7 +3,10 @@
 // Creates RLS-enabled tables, adds policies, and uploads generated quiz data
 
 import { supabase } from './supabaseClient.js';
-import Papa from "https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.js";
+// ✅ Load Papa Parse as a global script
+await import("https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js");
+const Papa = window.Papa;
+
 
 // ✅ Added Papa Parse import
 
