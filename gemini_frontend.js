@@ -75,8 +75,16 @@ classSelect.addEventListener("change", async () => {
 
   try {
     const text = await askGemini(prompt);
-    const clean = text.replace(/```json|```/g, "").replace(/\n/g, "").trim();
-    const subjects = JSON.parse(clean.endsWith("]") ? clean : clean + "]");
+    // ✅ Fix: Safely clean "json" or extra text before parsing
+    const clean = text
+      .replace(/```json|```/g, "")
+      .replace(/^[^{[]*json[:\s-]*/i, "")
+      .replace(/\n/g, "")
+      .trim();
+
+    const jsonString = clean.endsWith("]") ? clean : clean + "]";
+    const subjects = JSON.parse(jsonString);
+
     subjectSelect.innerHTML = '<option value="">-- Select Subject --</option>';
     subjects.forEach((s) => {
       subjectSelect.innerHTML += `<option value="${s}">${s}</option>`;
@@ -101,8 +109,16 @@ subjectSelect.addEventListener("change", async () => {
 
   try {
     const text = await askGemini(prompt);
-    const clean = text.replace(/```json|```/g, "").replace(/\n/g, "").trim();
-    const chapters = JSON.parse(clean.endsWith("]") ? clean : clean + "]");
+    // ✅ Fix: Same cleanup for chapters
+    const clean = text
+      .replace(/```json|```/g, "")
+      .replace(/^[^{[]*json[:\s-]*/i, "")
+      .replace(/\n/g, "")
+      .trim();
+
+    const jsonString = clean.endsWith("]") ? clean : clean + "]";
+    const chapters = JSON.parse(jsonString);
+
     chapterSelect.innerHTML = '<option value="">-- Select Chapter --</option>';
     chapters.forEach((ch) => {
       chapterSelect.innerHTML += `<option value="${ch}">${ch}</option>`;
@@ -250,7 +266,6 @@ async function updateCurriculum(chapterTitle, newId) {
       return;
     }
 
-    // ✅ You can later add a GitHub commit API here to push this update automatically.
     console.log("✅ Updated curriculum.js content preview:\n", text.slice(0, 800));
   } catch (err) {
     log(`❌ Failed to update curriculum.js: ${err.message}`);
