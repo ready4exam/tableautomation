@@ -6,7 +6,6 @@
 import { supabase } from './supabaseClient.js';
 
 const GEMINI_API_KEY = "AIzaSyBX5TYNhyMR9S8AODdFkfsJW-vSbVZVI5Y"; // 🔑 Replace with your Gemini API key
-const GEMINI_MODEL = "gemini-1.5-flash-latest"; // ✅ updated to correct live model
 
 const classSelect = document.getElementById('classSelect');
 const subjectSelect = document.getElementById('subjectSelect');
@@ -28,7 +27,7 @@ async function askGemini(prompt) {
   log("🧠 Asking Gemini 2.5 Flash...");
 
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
