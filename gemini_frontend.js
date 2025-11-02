@@ -4,7 +4,7 @@
 
 import { supabase } from './supabaseClient.js';
 // Replace the global script loading with a direct ES Module import
-import Papa from 'https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.js':
+import Papa from 'https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.js';
 // Note the change from papaparse.min.js to papaparse.esm.js for module support.
 
 // ✅ Added Papa Parse import
