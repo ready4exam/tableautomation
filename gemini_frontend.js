@@ -1,24 +1,31 @@
-// ------------------- Ready4Exam Gemini 2.5 Frontend Automation -------------------
+// ------------------- Gemini Frontend Automation -------------------
 // Works with supabaseClient.js and Gemini 2.5 Flash
-// Creates RLS-enabled tables, adds policies, uploads quiz data, and updates curriculum.js
+// Creates RLS-enabled tables, adds policies, uploads generated quiz data,
+// and updates curriculum.js reference IDs automatically.
 
-import { supabase } from "./supabaseClient.js";
+import { supabase } from './supabaseClient.js';
 
-const GEMINI_API_KEY = "AIzaSyBX5TYNhyMR9S8AODdFkfsJW-vSbVZVI5Y"; // 🔑 Your Gemini API key
+const GEMINI_API_KEY = "AIzaSyBX5TYNhyMR9S8AODdFkfsJW-vSbVZVI5Y"; // 🔑 Replace with your Gemini API key
 
-// ------------------- Logging -------------------
-function log(msg) {
+const classSelect = document.getElementById('classSelect');
+const subjectSelect = document.getElementById('subjectSelect');
+const chapterSelect = document.getElementById('chapterSelect');
+const generateBtn = document.getElementById('generateBtn');
+const logEl = document.getElementById('log');
+
+// ------------- Logging -------------
+const log = (msg) => {
   console.log(msg);
-  const logEl = document.getElementById("log");
   if (logEl) {
     logEl.textContent += msg + "\n";
     logEl.scrollTop = logEl.scrollHeight;
   }
-}
+};
 
-// ------------------- Gemini 2.5 Flash Call -------------------
+// ------------- Ask Gemini API -------------
 async function askGemini(prompt) {
   log("🧠 Asking Gemini 2.5 Flash...");
+
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
     {
@@ -31,22 +38,23 @@ async function askGemini(prompt) {
   if (!res.ok) throw new Error(`Gemini request failed (${res.status})`);
   const data = await res.json();
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-  return text.replace(/```[a-z]*|```/g, "").trim();
+  return text.replace(/```csv|```/g, "").trim();
 }
 
-// ------------------- Parse CSV -------------------
+// ------------- Parse CSV safely -------------
 function parseCSV(csv) {
   const lines = csv
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith("#"));
+
   const headers = lines[0]
     .split(",")
     .map((h) => h.trim().replace(/^"|"$/g, ""));
   const rows = lines.slice(1).map((line) => {
-    const cols = line
-      .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
-      .map((v) => v.trim().replace(/^"|"$/g, ""));
+    const cols = line.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map((v) =>
+      v.trim().replace(/^"|"$/g, "")
+    );
     const row = {};
     headers.forEach((h, i) => (row[h] = cols[i] || ""));
     return row;
@@ -54,26 +62,97 @@ function parseCSV(csv) {
   return rows;
 }
 
-// ------------------- Fetch Subjects -------------------
-async function fetchSubjects(selectedClass) {
+// ------------- Handle Class Selection -------------
+classSelect.addEventListener("change", async () => {
+  const selectedClass = classSelect.value;
+  if (!selectedClass) return;
+  subjectSelect.innerHTML = "";
+  chapterSelect.innerHTML = "";
+  generateBtn.disabled = true;
+
   log(`🔍 Fetching NCERT subjects for Class ${selectedClass}...`);
-  const prompt = `List all NCERT subjects for Class ${selectedClass} in a valid JSON array, like ["Science","Mathematics","Social Science","English"].`;
-  const text = await askGemini(prompt);
-  const clean = text.replace(/```json|```/g, "").replace(/\n/g, "").trim();
-  return JSON.parse(clean.match(/\[.*\]/s)?.[0] || "[]");
-}
+  const prompt = `List all NCERT subjects for Class ${selectedClass} in JSON array format. Example: ["Science","Mathematics","Social Science","English"]`;
 
-// ------------------- Fetch Chapters -------------------
-async function fetchChapters(selectedClass, subject) {
+  try {
+    const text = await askGemini(prompt);
+    // ✅ Fix: Safely clean "json" or extra text before parsing
+    const clean = text
+      .replace(/```json|```/g, "")
+      .replace(/^[^{[]*json[:\s-]*/i, "")
+      .replace(/\n/g, "")
+      .trim();
+
+    const jsonString = clean.endsWith("]") ? clean : clean + "]";
+    const subjects = JSON.parse(jsonString);
+
+    subjectSelect.innerHTML = '<option value="">-- Select Subject --</option>';
+    subjects.forEach((s) => {
+      subjectSelect.innerHTML += `<option value="${s}">${s}</option>`;
+    });
+    subjectSelect.disabled = false;
+    log(`✅ Found ${subjects.length} subjects.`);
+  } catch (err) {
+    log(`❌ Failed to fetch subjects: ${err.message}`);
+  }
+});
+
+// ------------- Handle Subject Selection -------------
+subjectSelect.addEventListener("change", async () => {
+  const selectedClass = classSelect.value;
+  const subject = subjectSelect.value;
+  if (!subject) return;
+  chapterSelect.innerHTML = "";
+  generateBtn.disabled = true;
+
   log(`📖 Fetching chapters for ${subject} (Class ${selectedClass})...`);
-  const prompt = `List all NCERT chapters for Class ${selectedClass}, Subject ${subject} as a JSON array of chapter names.`;
-  const text = await askGemini(prompt);
-  const clean = text.replace(/```json|```/g, "").replace(/\n/g, "").trim();
-  return JSON.parse(clean.match(/\[.*\]/s)?.[0] || "[]");
-}
+  const prompt = `List all NCERT chapters for Class ${selectedClass}, Subject ${subject} as a JSON array of chapter names only.`;
 
-// ------------------- Prepare Supabase Table -------------------
-async function prepareTable(tableName) {
+  try {
+    const text = await askGemini(prompt);
+    // ✅ Fix: Same cleanup for chapters
+    const clean = text
+      .replace(/```json|```/g, "")
+      .replace(/^[^{[]*json[:\s-]*/i, "")
+      .replace(/\n/g, "")
+      .trim();
+
+    const jsonString = clean.endsWith("]") ? clean : clean + "]";
+    const chapters = JSON.parse(jsonString);
+
+    chapterSelect.innerHTML = '<option value="">-- Select Chapter --</option>';
+    chapters.forEach((ch) => {
+      chapterSelect.innerHTML += `<option value="${ch}">${ch}</option>`;
+    });
+    chapterSelect.disabled = false;
+    log(`✅ Found ${chapters.length} chapters.`);
+  } catch (err) {
+    log(`❌ Failed to fetch chapters: ${err.message}`);
+  }
+});
+
+// ------------- Handle Chapter Selection -------------
+chapterSelect.addEventListener("change", () => {
+  generateBtn.disabled = !chapterSelect.value;
+});
+
+// ------------- Handle Question Generation -------------
+generateBtn.addEventListener("click", async () => {
+  const selectedClass = classSelect.value;
+  const subject = subjectSelect.value;
+  const chapter = chapterSelect.value;
+  if (!chapter) return alert("Please select a chapter first.");
+
+  const tableName = (() => {
+    let clean = chapter
+      .toLowerCase()
+      .replace(/[:;.,!?'"()]/g, "")
+      .replace(/\s+/g, "_")
+      .trim();
+    return clean.endsWith("_quiz") ? clean : `${clean}_quiz`;
+  })();
+
+  log(`🧾 Preparing table: ${tableName}`);
+
   const columns = [
     "difficulty",
     "question_type",
@@ -121,34 +200,45 @@ async function prepareTable(tableName) {
     END $$;
   `;
 
-  const { error } = await supabase.rpc("execute_sql", { query: sql });
-  if (error) throw new Error(error.message);
-  log(`✅ Table ${tableName} ready with RLS and policies.`);
-}
+  try {
+    const { error } = await supabase.rpc("execute_sql", { query: sql });
+    if (error) throw new Error(error.message);
+    log(`✅ Table ${tableName} ready with RLS and policies.`);
+  } catch (err) {
+    log(`⚠️ Table or RLS setup failed: ${err.message}`);
+    return;
+  }
 
-// ------------------- Generate Quiz Questions -------------------
-async function generateQuestions(selectedClass, subject, chapter) {
   log(`📚 Generating 60 questions for ${subject} → ${chapter}...`);
   const prompt = `
 Generate exactly 60 unique quiz questions for Class ${selectedClass}, Subject ${subject}, Chapter ${chapter}.
-Return ONLY a valid CSV with these headers:
+Return ONLY a valid CSV (no markdown fences, no code blocks) with these headers:
 difficulty,question_type,question_text,scenario_reason_text,option_a,option_b,option_c,option_d,correct_answer_key
-Ensure all commas inside text are properly escaped in quotes.
+Ensure all commas are properly escaped in quotes. Example row:
+Simple,MCQ,"What is the chemical formula of water?","",H2O,CO2,O2,N2,A
+Distribution:
+- Simple: 20 (10 MCQ, 5 AR, 5 Case-Based)
+- Medium: 20 (10 MCQ, 5 AR, 5 Case-Based)
+- Advanced: 20 (10 MCQ, 5 AR, 5 Case-Based)
 `;
-  const csvText = await askGemini(prompt);
-  log("✅ CSV received. Parsing...");
-  return parseCSV(csvText);
-}
 
-// ------------------- Upload Quiz Data -------------------
-async function uploadToSupabase(tableName, rows) {
-  log(`📤 Uploading ${rows.length} rows to Supabase...`);
-  const { error } = await supabase.from(tableName).insert(rows);
-  if (error) throw error;
-  log(`🎉 Successfully inserted ${rows.length} questions into ${tableName}.`);
-}
+  try {
+    const csvText = await askGemini(prompt);
+    log("✅ CSV received. Parsing...");
+    const rows = parseCSV(csvText);
+    log(`📤 Uploading ${rows.length} rows to Supabase...`);
 
-// ------------------- Update curriculum.js -------------------
+    const { error: insertError } = await supabase.from(tableName).insert(rows);
+    if (insertError) throw insertError;
+    log(`🎉 Successfully inserted ${rows.length} questions into ${tableName}.`);
+
+    await updateCurriculum(chapter, tableName);
+  } catch (err) {
+    log(`❌ Error: ${err.message}`);
+  }
+});
+
+// ------------- Update curriculum.js (after successful insert) -------------
 async function updateCurriculum(chapterTitle, newId) {
   const CURRICULUM_URL =
     "https://raw.githubusercontent.com/ready4exam/ninth/main/js/curriculum.js";
@@ -158,10 +248,13 @@ async function updateCurriculum(chapterTitle, newId) {
     const res = await fetch(CURRICULUM_URL);
     let text = await res.text();
 
+    // Escape special regex chars in chapterTitle
     const safeTitle = chapterTitle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    // 🧠 Match even if curriculum title includes "Chapter X:" prefix
     const regex = new RegExp(
-      `\\{\\s*id:\\s*"(.*?)",\\s*title:\\s*"${safeTitle}"\\s*\\}`,
-      "g"
+      `\\{\\s*id:\\s*"(.*?)",\\s*title:\\s*"(?:Chapter\\s*\\d+:\\s*)?${safeTitle}"\\s*\\}`,
+      "gi"
     );
 
     let updated = false;
@@ -176,9 +269,10 @@ async function updateCurriculum(chapterTitle, newId) {
       return;
     }
 
+    // Optional: preview first 800 chars of modified file
     console.log("✅ Updated curriculum.js content preview:\n", text.slice(0, 800));
+
   } catch (err) {
     log(`❌ Failed to update curriculum.js: ${err.message}`);
   }
 }
-
