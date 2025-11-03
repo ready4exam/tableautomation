@@ -13,7 +13,7 @@ export default async function handler(req, res) {
     const token = process.env.GITHUB_TOKEN;
     const owner = process.env.GITHUB_OWNER;
     const repo = process.env.GITHUB_REPO;
-    const filePath = "ninth/js/curriculum.js"; // ✅ Adjust if file path changes
+    const filePath = "js/curriculum.js"; // ✅ Adjust if file path changes
 
     // 1️⃣ Fetch current curriculum.js from GitHub
     const fileRes = await fetch(
