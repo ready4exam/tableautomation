@@ -150,6 +150,7 @@ subjectSelect.addEventListener("change", async () => {
 
   log(`📖 Fetching chapters for ${subject} (Class ${selectedClass})...`);
 
+  // ✅ Updated, more reliable prompt
   const prompt = `
 Return ONLY a valid JSON array (no markdown, no code fences) of official NCERT chapter titles
 for Class ${selectedClass}, Subject ${subject}.
@@ -305,42 +306,31 @@ async function askGeminiWithRetry(prompt) {
   throw new Error("No valid response from Gemini after retry");
 }
 
-// ------------- ✅ Improved Curriculum.js Update -------------
+// ------------- ✅ Improved Curriculum.js Update (calls Vercel API) -------------
 async function updateCurriculum(chapterTitle, newId) {
-  const CURRICULUM_URL =
-    "https://raw.githubusercontent.com/ready4exam/ninth/main/js/curriculum.js";
-
+  // This function now calls your serverless endpoint to commit the change to GitHub.
+  // Endpoint should be deployed at /api/updateCurriculum (Vercel serverless function).
+  // Body: { chapterTitle, newId }
   try {
-    log(`🪶 Updating curriculum.js for chapter: ${chapterTitle} → ${newId}`);
-    const res = await fetch(CURRICULUM_URL);
-    if (!res.ok) throw new Error("Unable to fetch curriculum.js");
-    let text = await res.text();
+    log(`🪶 Updating curriculum.js for chapter: ${chapterTitle} → ${newId} (server commit)`);
 
-    const cleanTitle = chapterTitle
-      .replace(/chapter\s*\d+[:\-]?\s*/i, "")
-      .trim()
-      .toLowerCase();
-
-    const regex = new RegExp(
-      `id:\\s*"(.*?)"\\s*,\\s*title:\\s*"(?:Chapter\\s*\\d+[:\\-]?\\s*)?${cleanTitle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`,
-      "i"
-    );
-
-    let updated = false;
-    text = text.replace(regex, (match, oldId) => {
-      updated = true;
-      log(`🧩 Replaced id "${oldId}" → "${newId}"`);
-      return match.replace(`id: "${oldId}"`, `id: "${newId}"`);
+    const res = await fetch('/api/updateCurriculum', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chapterTitle, newId })
     });
 
-    if (!updated) {
-      log("⚠️ Chapter title not found in curriculum.js — no update performed.");
+    const j = await res.json();
+    if (!res.ok) {
+      log(`❌ curriculum commit failed: ${j.error || JSON.stringify(j)}`);
+      console.error("curriculum commit details:", j);
       return;
     }
 
-    console.log("✅ Updated curriculum.js preview:\n", text.slice(0, 800));
-
+    log(`✅ curriculum.js committed. Commit SHA: ${j.commit || j.commit?.sha || j.commit?.id || 'unknown'}`);
+    console.log("Server response:", j);
   } catch (err) {
-    log(`❌ Failed to update curriculum.js: ${err.message}`);
+    log(`❌ Failed to update curriculum.js via API: ${err.message}`);
+    console.error(err);
   }
 }
