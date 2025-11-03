@@ -11,11 +11,11 @@ export default async function handler(req, res) {
     }
 
     const token = process.env.GITHUB_TOKEN;
-    const owner = process.env.GITHUB_OWNER; 
+    const owner = process.env.GITHUB_OWNER;
     const repo = process.env.GITHUB_REPO;
-    const filePath = "ninth/js/curriculum.js"; // adjust if inside a subfolder
+    const filePath = "ninth/js/curriculum.js"; // ✅ Adjust if file path changes
 
-    // Fetch existing curriculum.js
+    // 1️⃣ Fetch current curriculum.js from GitHub
     const fileRes = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`,
       {
@@ -30,13 +30,27 @@ export default async function handler(req, res) {
     const fileData = await fileRes.json();
     const content = Buffer.from(fileData.content, "base64").toString("utf-8");
 
-    // Update the ID
-    const updatedContent = content.replace(
-      new RegExp(`id:\\s*["'\`]${chapterTitle.replace(/['"]/g, "")}["'\`]`, "g"),
-      `id: "${newId}"`
+    // 2️⃣ Find the chapter block containing the given title (flexible search)
+    const regex = new RegExp(
+      `\\{[^\\}]*title:\\s*["'\`][^"'\`]*${chapterTitle}[^"'\`]*["'\`][^\\}]*\\}`,
+      "i"
     );
 
-    // Commit back to GitHub
+    const updatedContent = content.replace(regex, (match) => {
+      // Replace the ID inside the matched chapter block
+      if (/id:\s*["'`].*?["'`]/.test(match)) {
+        return match.replace(/id:\s*["'`].*?["'`]/, `id: "${newId}"`);
+      }
+      return match; // if no id found, leave as is
+    });
+
+    if (updatedContent === content) {
+      throw new Error(
+        `Chapter title "${chapterTitle}" not found in curriculum.js`
+      );
+    }
+
+    // 3️⃣ Commit the updated content back to GitHub
     const updateRes = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`,
       {
@@ -46,7 +60,7 @@ export default async function handler(req, res) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          message: `Update ID for ${chapterTitle}`,
+          message: `Auto-update ID for "${chapterTitle}" → "${newId}"`,
           content: Buffer.from(updatedContent).toString("base64"),
           sha: fileData.sha,
         }),
@@ -59,7 +73,7 @@ export default async function handler(req, res) {
 
     return res
       .status(200)
-      .json({ message: "curriculum.js updated successfully ✅" });
+      .json({ message: "✅ curriculum.js updated successfully" });
   } catch (error) {
     console.error("Error:", error);
     return res.status(500).json({ error: error.message });
