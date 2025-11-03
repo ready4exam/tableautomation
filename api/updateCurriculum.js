@@ -11,7 +11,7 @@ export default async function handler(req, res) {
     }
 
     const token = process.env.GITHUB_TOKEN;
-    const owner = process.env.GITHUB_OWNER;
+    const owner = process.env.GITHUB_OWNER; 
     const repo = process.env.GITHUB_REPO;
     const filePath = "js/curriculum.js"; // adjust if inside a subfolder
 
