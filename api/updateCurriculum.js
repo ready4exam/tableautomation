@@ -36,19 +36,24 @@ export default async function handler(req, res) {
       "i"
     );
 
-    const updatedContent = content.replace(regex, (match) => {
-      // Replace the ID inside the matched chapter block
-      if (/id:\s*["'`].*?["'`]/.test(match)) {
-        return match.replace(/id:\s*["'`].*?["'`]/, `id: "${newId}"`);
-      }
-      return match; // if no id found, leave as is
-    });
+// Title-agnostic and case-insensitive replacement
+const updatedContent = content.replace(
+  new RegExp(
+    `\\{\\s*id:\\s*["'\`][^"'\`]+["'\`],\\s*title:\\s*["'\`][^"'\`]*${chapterTitle}[^"'\`]*["'\`]`,
+    "i"
+  ),
+  (match) => {
+    // Replace only the id inside the matched object
+    return match.replace(/id:\s*["'`][^"'`]+["'`]/, `id: "${newId}"`);
+  }
+);
 
-    if (updatedContent === content) {
-      throw new Error(
-        `Chapter title "${chapterTitle}" not found in curriculum.js`
-      );
-    }
+// If nothing changed, throw an explicit error
+if (updatedContent === content) {
+  throw new Error(
+    `Chapter title "${chapterTitle}" not found in curriculum.js`
+  );
+}
 
     // 3️⃣ Commit the updated content back to GitHub
     const updateRes = await fetch(
