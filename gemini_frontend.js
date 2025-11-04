@@ -24,37 +24,77 @@ const log = (msg) => {
 };
 
 // ------------- Ask Gemini API -------------
+// ---------- Safe askGemini (client) with server-proxy fallback ----------
+/**
+ * askGemini(prompt)
+ * - First tries server-side proxy at /api/gemini (recommended).
+ * - If proxy fails or not available, FALLS BACK to existing client-side direct call using GEMINI_API_KEY (if present).
+ *
+ * This keeps things non-breaking while enabling secure server-side usage.
+ */
 async function askGemini(prompt) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
-
-  const body = {
-    contents: [
-      { role: "user", parts: [{ text: prompt }] }
-    ]
-  };
-
+  // Try server proxy first
   try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
+    const proxyResp = await fetch('/api/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt })
     });
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`HTTP ${res.status}: ${text}`);
+    // If proxy returned OK and valid JSON, prefer it
+    if (proxyResp.ok) {
+      const proxyJson = await proxyResp.json();
+      // Many server proxies return Gemini JSON; try to extract text safely
+      const outputText =
+        proxyJson?.candidates?.[0]?.content?.parts?.[0]?.text ||
+        proxyJson?.output?.[0]?.content?.parts?.[0]?.text ||
+        (typeof proxyJson === 'string' ? proxyJson : null) ||
+        JSON.stringify(proxyJson);
+
+      if (outputText && String(outputText).trim().length > 0) {
+        return String(outputText).trim();
+      }
+      // If proxy returned but with empty payload, fall through to client fallback
+      console.warn('⚠️ /api/gemini returned empty output; falling back to client call.');
+    } else {
+      console.warn(`⚠️ /api/gemini responded ${proxyResp.status} — falling back to client call.`);
     }
-
-    const data = await res.json();
-    const output = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-    if (!output) throw new Error("Empty response from Gemini");
-
-    return output;
   } catch (err) {
-    console.error("❌ Gemini API error:", err);
-    throw err;
+    console.warn('⚠️ Proxy /api/gemini failed:', err?.message || err);
   }
+
+  // --- Client-side fallback (non-breaking) ---
+  // If your repo still defines GEMINI_API_KEY in some file, this preserves existing behavior.
+  if (typeof GEMINI_API_KEY !== 'undefined' && GEMINI_API_KEY) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+      const body = { contents: [ { role: "user", parts: [{ text: prompt }] } ] };
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status}: ${text}`);
+      }
+
+      const data = await res.json();
+      const output = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (!output) throw new Error("Empty response from Gemini (client-call)");
+      return output;
+    } catch (err) {
+      console.error("❌ Client Gemini call failed:", err);
+      throw err; // bubble up so caller sees failure
+    }
+  }
+
+  // If neither proxy nor client call worked, return an error
+  throw new Error('No available Gemini provider: proxy failed and GEMINI_API_KEY not present.');
 }
+
 
 // ------------- Universal JSON / Array Extractor -------------
 function extractArrayFromText(text) {
