@@ -1,0 +1,10 @@
+{
+  "name": "tableautomation",
+  "version": "1.0.0",
+  "description": "Ready4Exam automation backend",
+  "main": "index.js",
+  "type": "module",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.47.2"
+  }
+}
