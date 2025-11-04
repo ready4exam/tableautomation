@@ -1,4 +1,4 @@
-// /api/manageSupabase.js
+  // /api/manageSupabase.js
 import { createClient } from "@supabase/supabase-js";
 
 export const config = {
@@ -6,6 +6,9 @@ export const config = {
 };
 
 export default async function handler(req) {
+   console.log("🚀 manageSupabase function started");  // <-- add
+  console.log("🧩 Env URL:", process.env.SUPABASE_URL); // <-- add
+  
   const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
