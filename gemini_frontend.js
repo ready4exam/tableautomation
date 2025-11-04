@@ -1,4 +1,4 @@
-// ------------------- Gemini Frontend Automation -------------------
+// ------------------- Gemini Frontend Automation ------------------- 
 // Works with supabaseClient.js and Gemini 2.5 Flash
 // Creates RLS-enabled tables, adds policies, uploads generated quiz data,
 // and updates curriculum.js reference IDs automatically.
