@@ -13,9 +13,9 @@ export default async function handler(req, res) {
     const token = process.env.GITHUB_TOKEN;
     const owner = process.env.GITHUB_OWNER;
     const repo = process.env.GITHUB_REPO;
-    const filePath = "js/curriculum.js"; // ✅ Adjust if file path changes
+    const filePath = "js/curriculum.js"; // ✅ correct path
 
-    // 1️⃣ Fetch current curriculum.js from GitHub
+    // 1️⃣ Fetch the current curriculum.js from GitHub
     const fileRes = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`,
       {
@@ -30,32 +30,41 @@ export default async function handler(req, res) {
     const fileData = await fileRes.json();
     const content = Buffer.from(fileData.content, "base64").toString("utf-8");
 
-    // 2️⃣ Find the chapter block containing the given title (flexible search)
-    const regex = new RegExp(
-      `\\{[^\\}]*title:\\s*["'\`][^"'\`]*${chapterTitle}[^"'\`]*["'\`][^\\}]*\\}`,
-      "i"
+    // 2️⃣ Normalize chapter title for flexible matching
+    const normalizedTitle = chapterTitle
+      .replace(/chapter\s*\d*[:\-]*/i, "") // remove "Chapter X:" if exists
+      .trim()
+      .toLowerCase();
+
+    let found = false;
+
+    // 3️⃣ Scan through all chapter entries and replace ID where the title roughly matches
+    const updatedContent = content.replace(
+      /\{\s*id:\s*["'`][^"'`]+["'`],\s*title:\s*["'`]([^"'`]+)["'`]\s*\}/g,
+      (match, titleText) => {
+        const normalizedCurrTitle = titleText
+          .replace(/chapter\s*\d*[:\-]*/i, "")
+          .trim()
+          .toLowerCase();
+
+        if (normalizedCurrTitle.includes(normalizedTitle)) {
+          found = true;
+          return match.replace(
+            /id:\s*["'`][^"'`]+["'`]/,
+            `id: "${newId}"`
+          );
+        }
+        return match;
+      }
     );
 
-// Title-agnostic and case-insensitive replacement
-const updatedContent = content.replace(
-  new RegExp(
-    `\\{\\s*id:\\s*["'\`][^"'\`]+["'\`],\\s*title:\\s*["'\`][^"'\`]*${chapterTitle}[^"'\`]*["'\`]`,
-    "i"
-  ),
-  (match) => {
-    // Replace only the id inside the matched object
-    return match.replace(/id:\s*["'`][^"'`]+["'`]/, `id: "${newId}"`);
-  }
-);
+    if (!found) {
+      throw new Error(
+        `Chapter title "${chapterTitle}" not found in curriculum.js`
+      );
+    }
 
-// If nothing changed, throw an explicit error
-if (updatedContent === content) {
-  throw new Error(
-    `Chapter title "${chapterTitle}" not found in curriculum.js`
-  );
-}
-
-    // 3️⃣ Commit the updated content back to GitHub
+    // 4️⃣ Commit updated content back to GitHub
     const updateRes = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`,
       {
@@ -76,9 +85,12 @@ if (updatedContent === content) {
       throw new Error(`GitHub update failed: ${updateRes.statusText}`);
     }
 
-    return res
-      .status(200)
-      .json({ message: "✅ curriculum.js updated successfully" });
+    const updateData = await updateRes.json();
+
+    return res.status(200).json({
+      message: "✅ curriculum.js updated successfully",
+      commitSHA: updateData.commit?.sha || null,
+    });
   } catch (error) {
     console.error("Error:", error);
     return res.status(500).json({ error: error.message });
