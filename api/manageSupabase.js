@@ -2,7 +2,7 @@
 import { createClient } from "@supabase/supabase-js";
 
 export const config = {
-  runtime: "edge", // edge runtime = faster, free
+  runtime: "nodejs18.x", // edge runtime = faster, free
 };
 
 export default async function handler(req) {
