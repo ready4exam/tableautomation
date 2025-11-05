@@ -1,29 +1,39 @@
 // /api/manageSupabase.js
 import { createClient } from "@supabase/supabase-js";
 
-// ✅ Force Node runtime on Vercel
-export const config = {
-  runtime: "nodejs",
-};
+export const config = { runtime: "nodejs" };
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Only POST allowed" });
   }
 
-  const { tableName, rows } = req.body || {};
-  if (!tableName || !Array.isArray(rows) || rows.length === 0) {
-    return res.status(400).json({ error: "Invalid request body" });
-  }
-
   try {
-    const supabase = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_KEY
-    );
+    const { class: className, tableName, rows } = req.body;
 
-    // 🧱 1️⃣ Build CREATE TABLE SQL (safe, idempotent)
-    const createSQL = `
+    if (!className || !tableName || !Array.isArray(rows) || rows.length === 0) {
+      return res.status(400).json({ error: "Missing or invalid parameters" });
+    }
+
+    // 🧭 Pick Supabase credentials based on class
+    let SUPABASE_URL, SUPABASE_SERVICE_KEY;
+    switch (className) {
+      case "9":
+        SUPABASE_URL = process.env.SUPABASE_URL_9;
+        SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY_9;
+        break;
+      case "11":
+        SUPABASE_URL = process.env.SUPABASE_URL_11;
+        SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY_11;
+        break;
+      default:
+        return res.status(400).json({ error: `Unsupported class: ${className}` });
+    }
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+
+    // 1️⃣ Create table if not exists
+    const createQuery = `
       create table if not exists public.${tableName} (
         id bigserial primary key,
         difficulty text,
@@ -37,33 +47,19 @@ export default async function handler(req, res) {
       );
     `;
 
-    // 🧩 2️⃣ Try to execute via RPC; fallback if not available
-    try {
-      const { error: execError } = await supabase.rpc("execute_sql", { query: createSQL });
-      if (execError) {
-        console.warn("RPC execute_sql not available, fallback to fetch:", execError.message);
-        await fetch(`${process.env.SUPABASE_URL}/rest/v1/rpc/execute_sql`, {
-          method: "POST",
-          headers: {
-            apikey: process.env.SUPABASE_SERVICE_KEY,
-            Authorization: `Bearer ${process.env.SUPABASE_SERVICE_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ query: createSQL }),
-        });
-      }
-    } catch (rpcError) {
-      console.warn("⚠️ RPC call skipped:", rpcError.message);
-    }
+    // Execute using RPC helper (optional — depends on your setup)
+    const { error: execError } = await supabase.rpc("execute_sql", { query: createQuery });
+    if (execError) throw execError;
 
-    // 🧮 3️⃣ Insert rows
+    // 2️⃣ Insert rows
     const { error: insertError } = await supabase.from(tableName).insert(rows);
     if (insertError) throw insertError;
 
-    console.log(`✅ ${rows.length} rows inserted into ${tableName}`);
+    console.log(`✅ Inserted ${rows.length} rows into ${tableName} (Class ${className})`);
     return res.status(200).json({
-      message: `✅ ${rows.length} rows inserted into ${tableName}`,
+      message: `✅ ${rows.length} rows inserted into ${tableName} (Class ${className})`,
     });
+
   } catch (err) {
     console.error("❌ manageSupabase error:", err.message);
     return res.status(500).json({ error: err.message });
