@@ -1,6 +1,6 @@
 // File: /api/gemini.js
 export const config = {
-  runtime: "edge", // Vercel Edge Runtime = faster response
+  runtime: "edge", // Fast Vercel Edge Function
 };
 
 export default async function handler(req) {
@@ -49,7 +49,7 @@ export default async function handler(req) {
     });
   }
 
-  const { prompt } = body || {};
+  const { prompt, class: classValue = "9" } = body || {};
   if (!prompt) {
     return new Response(JSON.stringify({ error: "Missing prompt" }), {
       status: 400,
@@ -58,15 +58,11 @@ export default async function handler(req) {
   }
 
   const payload = {
-    contents: [
-      {
-        parts: [{ text: prompt }],
-      },
-    ],
+    contents: [{ parts: [{ text: prompt }] }],
   };
 
   try {
-    console.log("🧠 Sending request to Gemini 2.5 Flash...");
+    console.log(`🧠 Generating Gemini content for Class ${classValue}...`);
 
     const response = await fetch(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
@@ -93,6 +89,19 @@ export default async function handler(req) {
       return new Response(JSON.stringify({ error: "Gemini API failed", data }), {
         status: response.status,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // ✅ Automatically forward to manageSupabase
+    const tableName = body.tableName || "auto_generated_quiz";
+    const rows = body.rows || [];
+
+    if (rows.length > 0) {
+      console.log(`📤 Forwarding ${rows.length} rows to manageSupabase for class ${classValue}`);
+      await fetch(`${process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : ""}/api/manageSupabase`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ class: classValue, tableName, rows }),
       });
     }
 
