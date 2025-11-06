@@ -5,116 +5,60 @@ export const config = { runtime: "nodejs" };
 
 export default async function handler(req, res) {
   const origin = req.headers.origin || "";
-  res.set(corsHeaders(origin));
+  const headers = { ...corsHeaders(origin), "Content-Type": "application/json" };
+  res.set(headers);
 
   if (req.method === "OPTIONS") return res.status(200).end();
-
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Only POST allowed" });
-  }
+  if (req.method !== "POST") return res.status(405).json({ error: "Only POST allowed" });
 
   try {
     const { className, chapterTitle, newId } = req.body || {};
-    if (!className || !chapterTitle || !newId) {
-      return res.status(400).json({
-        error: "Missing required fields: className, chapterTitle, newId",
-      });
-    }
+    if (!className || !chapterTitle || !newId)
+      return res.status(400).json({ error: "Missing required fields" });
 
-    // 🧭 Choose correct repo based on class
-    let repoName;
-    switch (String(className)) {
-      case "5":
-        repoName = "fifth";
-        break;
-      case "6":
-        repoName = "sixth";
-        break;
-      case "7":
-        repoName = "seventh";
-        break;
-      case "8":
-        repoName = "eighth";
-        break;
-      case "9":
-        repoName = "ninth";
-        break;
-      case "10":
-        repoName = "tenth";
-        break;
-      case "11":
-        repoName = "eleventh";
-        break;
-      case "12":
-        repoName = "twelfth";
-        break;
-      default:
-        repoName = "ready4exam-test"; // fallback
-    }
+    const repo =
+      className === "11"
+        ? process.env.GITHUB_REPO_11
+        : process.env.GITHUB_REPO_9 || "ready4exam-ninth";
+    const owner = process.env.GITHUB_OWNER || "ready4exam";
+    const token = process.env.GITHUB_TOKEN;
 
-    const GITHUB_OWNER = process.env.GITHUB_OWNER || "ready4exam";
-    const GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.PERSONAL_ACCESS_TOKEN;
-    if (!GITHUB_TOKEN) {
-      throw new Error("Missing GitHub token in environment");
-    }
+    if (!token) throw new Error("Missing GitHub token");
 
-    const filePath = "js/curriculum.js"; // assumed consistent structure
+    const filePath = `template/js/curriculum.js`;
+    const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`;
 
-    // 1️⃣ Fetch current curriculum.js
-    const getUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${repoName}/contents/${filePath}`;
-    const getResp = await fetch(getUrl, {
-      headers: { Authorization: `Bearer ${GITHUB_TOKEN}` },
+    const currResp = await fetch(apiUrl, {
+      headers: { Authorization: `token ${token}`, Accept: "application/vnd.github.v3+json" },
     });
 
-    if (!getResp.ok) {
-      throw new Error(`Failed to fetch existing curriculum.js: ${getResp.statusText}`);
-    }
+    const currData = await currResp.json();
+    if (!currResp.ok) throw new Error(currData.message || "Failed to fetch curriculum.js");
 
-    const fileData = await getResp.json();
-    const decoded = Buffer.from(fileData.content, "base64").toString("utf-8");
+    const content = atob(currData.content);
+    const newLine = `  "${chapterTitle}": "${newId}",\n`;
+    const updatedContent = content.replace(/};\s*$/, `${newLine}};`);
 
-    // 2️⃣ Add or update chapter entry
-    const newLine = `  "${chapterTitle}": "${newId}",`;
-    let updatedContent = decoded;
-
-    const existingPattern = new RegExp(`"${chapterTitle}"\\s*:\\s*".*?"`, "i");
-    if (existingPattern.test(decoded)) {
-      updatedContent = decoded.replace(existingPattern, `"${chapterTitle}": "${newId}"`);
-    } else {
-      updatedContent = decoded.replace(/(\{)([\s\S]*)(\})/, `$1$2\n${newLine}\n$3`);
-    }
-
-    const updatedBase64 = Buffer.from(updatedContent).toString("base64");
-
-    // 3️⃣ Commit update
-    const putUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${repoName}/contents/${filePath}`;
-    const commitResp = await fetch(putUrl, {
+    const commitResp = await fetch(apiUrl, {
       method: "PUT",
       headers: {
-        Authorization: `Bearer ${GITHUB_TOKEN}`,
-        "Content-Type": "application/json",
+        Authorization: `token ${token}`,
+        Accept: "application/vnd.github.v3+json",
       },
       body: JSON.stringify({
-        message: `Update curriculum.js: ${chapterTitle} → ${newId}`,
-        content: updatedBase64,
-        sha: fileData.sha,
+        message: `Update curriculum for ${chapterTitle}`,
+        content: Buffer.from(updatedContent).toString("base64"),
+        sha: currData.sha,
       }),
     });
 
     const commitResult = await commitResp.json();
+    if (!commitResp.ok) throw new Error(commitResult.message || "Commit failed");
 
-    if (!commitResp.ok) {
-      throw new Error(commitResult.message || "GitHub commit failed");
-    }
-
-    console.log(`✅ curriculum.js updated for ${chapterTitle} in ${repoName}`);
-    return res.status(200).json({
-      success: true,
-      repo: repoName,
-      commit: commitResult.commit?.sha || null,
-    });
+    console.log(`✅ curriculum.js updated for ${chapterTitle}`);
+    return res.status(200).json({ message: "curriculum updated", commitResult });
   } catch (err) {
-    console.error("❌ updateCurriculum error:", err.message);
+    console.error("❌ updateCurriculum error:", err);
     return res.status(500).json({ error: err.message });
   }
 }
