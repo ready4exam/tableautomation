@@ -2,26 +2,26 @@
 import { corsHeaders } from "./_cors.js";
 
 export const config = {
-  runtime: "nodejs", // ✅ Use Node.js for longer Gemini API calls
+  runtime: "nodejs", // ✅ Use Node.js to prevent timeouts and missing CORS on failure
 };
 
 export default async function handler(req, res) {
   const origin = req.headers.origin || "";
   const headers = { ...corsHeaders(origin), "Content-Type": "application/json" };
 
-  // Handle preflight
+  // Preflight (CORS OPTIONS)
   if (req.method === "OPTIONS") {
     return res.status(200).set(headers).end();
   }
 
-  // Only POST allowed
+  // Restrict to POST only
   if (req.method !== "POST") {
     return res.status(405).set(headers).json({ error: "Only POST method allowed" });
   }
 
   const apiKey = process.env.google_api;
   if (!apiKey) {
-    return res.status(500).set(headers).json({ error: "Missing google_api env var" });
+    return res.status(500).set(headers).json({ error: "Missing google_api environment variable" });
   }
 
   let body;
