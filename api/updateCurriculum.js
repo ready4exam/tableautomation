@@ -1,126 +1,56 @@
-// /api/updateCurriculum.js
-export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Only POST requests allowed" });
-  }
+// File: /api/updateCurriculum.js
+import { Octokit } from "@octokit/rest";
+
+export const config = { runtime: "edge" };
+
+export default async function handler(req) {
+  if (req.method === "OPTIONS") return new Response(null, { status: 200 });
+  if (req.method !== "POST")
+    return new Response(JSON.stringify({ error: "POST only" }), { status: 405 });
+
+  const { className, chapterTitle, newId } = await req.json();
+  if (!className || !chapterTitle || !newId)
+    return new Response(JSON.stringify({ error: "Missing fields" }), { status: 400 });
+
+  const token = process.env.PERSONAL_ACCESS_TOKEN;
+  if (!token)
+    return new Response(JSON.stringify({ error: "Missing GitHub token" }), { status: 500 });
+
+  const owner = process.env.GITHUB_OWNER || "ready4exam";
+  let repo = "ready4exam-test";
+
+  // ✅ Choose repo based on class
+  const c = parseInt(className);
+  if (c === 9) repo = "ready4exam-ninth";
+  else if (c === 11) repo = "ready4exam-eleventh";
+
+  const octokit = new Octokit({ auth: token });
 
   try {
-    const { className, chapterTitle, newId } = req.body;
-    if (!className || !chapterTitle || !newId) {
-      return res.status(400).json({
-        error: "Missing required fields: className, chapterTitle, or newId",
-      });
-    }
+    const path = "js/curriculum.js";
+    const { data: file } = await octokit.repos.getContent({ owner, repo, path });
+    const content = Buffer.from(file.content, "base64").toString("utf-8");
 
-    // 🧩 Pick correct repo dynamically based on class
-    const owner = process.env.GITHUB_OWNER || "ready4exam";
-    let repo;
-
-    switch (String(className).trim()) {
-      case "9":
-      case "09":
-      case "class9":
-      case "Class 9":
-        repo = "ninth";
-        break;
-      case "11":
-      case "Class 11":
-      case "eleventh":
-        repo = "eleventh";
-        break;
-      case "12":
-      case "Class 12":
-      case "twelfth":
-        repo = "twelfth";
-        break;
-      default:
-        repo = process.env.GITHUB_REPO; // fallback
-        break;
-    }
-
-    const token = process.env.GITHUB_TOKEN;
-    if (!token) {
-      throw new Error("Missing GITHUB_TOKEN in environment");
-    }
-
-    const filePath = "js/curriculum.js"; // ✅ fixed standard path
-
-    console.log(`🪶 Updating ${owner}/${repo}/${filePath} ...`);
-
-    // 1️⃣ Fetch existing curriculum.js
-    const fileRes = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`,
-      { headers: { Authorization: `Bearer ${token}` } }
+    const updated = content.replace(
+      /(\{[^}]*title:\s*['"`])([^'"`]+)(['"`]\s*,\s*id:\s*['"`])([^'"`]+)(['"`]\s*\})/gi,
+      (m, p1, title, p3, id, p5) =>
+        title === chapterTitle ? `${p1}${title}${p3}${newId}${p5}` : m
     );
 
-    if (!fileRes.ok) {
-      const errText = await fileRes.text();
-      throw new Error(`GitHub fetch failed: ${fileRes.statusText} (${errText})`);
-    }
-
-    const fileData = await fileRes.json();
-    const content = Buffer.from(fileData.content, "base64").toString("utf-8");
-
-    // 2️⃣ Normalize title
-    const normalizedTitle = chapterTitle
-      .replace(/chapter\s*\d*[:\-]*/i, "")
-      .trim()
-      .toLowerCase();
-
-    let found = false;
-
-    // 3️⃣ Replace old ID with new table name
-    const updatedContent = content.replace(
-      /\{\s*id:\s*["'`][^"'`]+["'`],\s*title:\s*["'`]([^"'`]+)["'`]\s*\}/g,
-      (match, titleText) => {
-        const normalizedCurrTitle = titleText
-          .replace(/chapter\s*\d*[:\-]*/i, "")
-          .trim()
-          .toLowerCase();
-
-        if (normalizedCurrTitle.includes(normalizedTitle)) {
-          found = true;
-          return match.replace(/id:\s*["'`][^"'`]+["'`]/, `id: "${newId}"`);
-        }
-        return match;
-      }
-    );
-
-    if (!found) {
-      throw new Error(`Chapter title "${chapterTitle}" not found in curriculum.js`);
-    }
-
-    // 4️⃣ Push commit
-    const updateRes = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`,
-      {
-        method: "PUT",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          message: `Auto-update for "${chapterTitle}" → "${newId}" (Class ${className})`,
-          content: Buffer.from(updatedContent).toString("base64"),
-          sha: fileData.sha,
-        }),
-      }
-    );
-
-    if (!updateRes.ok) {
-      const text = await updateRes.text();
-      throw new Error(`GitHub update failed: ${updateRes.statusText} - ${text}`);
-    }
-
-    const updateData = await updateRes.json();
-    console.log("✅ curriculum.js updated successfully:", updateData.commit?.sha);
-
-    return res.status(200).json({
-      message: "✅ curriculum.js updated successfully",
-      commitSHA: updateData.commit?.sha || null,
+    const commit = await octokit.repos.createOrUpdateFileContents({
+      owner,
+      repo,
+      path,
+      message: `Update ${chapterTitle} → ${newId}`,
+      content: Buffer.from(updated, "utf-8").toString("base64"),
+      sha: file.sha,
     });
-  } catch (error) {
-    console.error("❌ updateCurriculum error:", error.message);
-    return res.status(500).json({ error: error.message });
+
+    return new Response(JSON.stringify({ success: true, commit: commit.data.commit.sha }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    return new Response(JSON.stringify({ error: err.message }), { status: 500 });
   }
 }
