@@ -25,7 +25,7 @@ const log = (msg) => {
 // ---------- Ask Gemini via Server Proxy ----------
 async function askGemini(prompt) {
   try {
-    const proxyResp = await fetch("/api/gemini", {
+    const proxyResp = await fetch(, "https://ready4exam-master-automation.vercel.app/api/gemini",{
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt }),
@@ -45,7 +45,7 @@ async function askGemini(prompt) {
   }
 
   // ⚙️ Fallback direct call (only if proxy fails)
-  const GEMINI_API_KEY = "YOUR_GEMINI_API_KEY";
+  //const GEMINI_API_KEY = "YOUR_GEMINI_API_KEY";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
   const body = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
 
