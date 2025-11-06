@@ -4,7 +4,6 @@
 
 import { supabase } from "./supabaseClient.js";
 
-const GEMINI_API_KEY = "AIzaSyBX5TYNhyMR9S8AODdFkfsJW-vSbVZVI5Y"; // fallback only
 const GEMINI_MODEL = "gemini-2.5-flash";
 const BACKEND_URL = "https://ready4exam-master-automation.vercel.app"; // central automation backend
 
