@@ -1,51 +1,46 @@
-// File: /api/manageSupabase.js
+// -------------------- /api/manageSupabase.js --------------------
 import { createClient } from "@supabase/supabase-js";
+import { corsHeaders } from "./_cors.js";
 
 export const config = { runtime: "nodejs" };
 
 export default async function handler(req, res) {
-  const allowedOrigins = [
-    "https://ready4exam.github.io",
-    "https://tableautomation-5iuc-git-main-ready4exams-projects.vercel.app",
-    "https://ready4exam-master-automation.vercel.app",
-    "http://localhost:5500",
-    "http://127.0.0.1:5500",
-  ];
+  const origin = req.headers.origin || "";
+  const headers = corsHeaders(origin);
+  res.set(headers);
 
-  const origin = req.headers.origin;
-  const corsHeaders = {
-    "Access-Control-Allow-Origin": allowedOrigins.includes(origin)
-      ? origin
-      : "https://ready4exam.github.io",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-  };
+  // Preflight
+  if (req.method === "OPTIONS") return res.status(200).end();
 
-  // ✅ Handle preflight OPTIONS request
-  if (req.method === "OPTIONS") {
-    return res.status(200).set(corsHeaders).end();
-  }
-
+  // Method check
   if (req.method !== "POST") {
-    return res.status(405).set(corsHeaders).json({ error: "Only POST allowed" });
+    return res.status(405).json({ error: "Only POST method allowed" });
   }
 
   try {
     const { class: classValue, tableName, rows } = req.body || {};
 
     if (!tableName || !Array.isArray(rows) || rows.length === 0) {
-      return res.status(400).set(corsHeaders).json({ error: "Invalid request body" });
+      return res.status(400).json({ error: "Invalid request body" });
     }
 
-    // 🧭 Choose Supabase credentials based on class
+    // 🧭 Choose Supabase credentials dynamically
     let supabaseUrl, supabaseKey;
 
-    if (classValue === "11") {
-      supabaseUrl = process.env.SUPABASE_URL_11;
-      supabaseKey = process.env.SUPABASE_SERVICE_KEY_11;
-    } else {
-      supabaseUrl = process.env.SUPABASE_URL_9;
-      supabaseKey = process.env.SUPABASE_SERVICE_KEY_9;
+    switch (String(classValue)) {
+      case "11":
+        supabaseUrl = process.env.SUPABASE_URL_11;
+        supabaseKey = process.env.SUPABASE_SERVICE_KEY_11;
+        break;
+      case "10":
+        supabaseUrl = process.env.SUPABASE_URL_10;
+        supabaseKey = process.env.SUPABASE_SERVICE_KEY_10;
+        break;
+      case "9":
+      default:
+        supabaseUrl = process.env.SUPABASE_URL_9;
+        supabaseKey = process.env.SUPABASE_SERVICE_KEY_9;
+        break;
     }
 
     if (!supabaseUrl || !supabaseKey) {
@@ -54,7 +49,7 @@ export default async function handler(req, res) {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // ✅ Ensure table exists with RLS and policy
+    // ✅ Create table + enable RLS + open access policies
     const createQuery = `
       CREATE TABLE IF NOT EXISTS public.${tableName} (
         id BIGSERIAL PRIMARY KEY,
@@ -69,29 +64,36 @@ export default async function handler(req, res) {
         correct_answer_key TEXT,
         created_at TIMESTAMP DEFAULT NOW()
       );
+
       ALTER TABLE public.${tableName} ENABLE ROW LEVEL SECURITY;
+
       DO $$
       BEGIN
         IF NOT EXISTS (
           SELECT 1 FROM pg_policies WHERE tablename = '${tableName}'
         ) THEN
-          CREATE POLICY "Enable all access" ON public.${tableName}
-          FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+          CREATE POLICY "Enable all access"
+          ON public.${tableName}
+          FOR ALL
+          TO anon, authenticated
+          USING (true)
+          WITH CHECK (true);
         END IF;
       END $$;
     `;
+
     await supabase.rpc("execute_sql", { query: createQuery });
 
-    // ✅ Insert rows
+    // ✅ Insert generated rows
     const { error: insertError } = await supabase.from(tableName).insert(rows);
     if (insertError) throw insertError;
 
-    console.log(`✅ Inserted ${rows.length} rows into ${tableName} for class ${classValue}`);
-    return res.status(200).set(corsHeaders).json({
-      message: `✅ ${rows.length} rows inserted into ${tableName} (class ${classValue})`,
+    console.log(`✅ Inserted ${rows.length} rows into ${tableName} (Class ${classValue})`);
+    return res.status(200).json({
+      message: `✅ ${rows.length} rows inserted into ${tableName} (Class ${classValue})`,
     });
   } catch (err) {
-    console.error("❌ manageSupabase error:", err);
-    return res.status(500).set(corsHeaders).json({ error: err.message });
+    console.error("❌ manageSupabase error:", err.message);
+    return res.status(500).json({ error: err.message });
   }
 }
