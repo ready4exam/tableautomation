@@ -229,8 +229,26 @@ difficulty,question_type,question_text,scenario_reason_text,option_a,option_b,op
     const rows = parseCSV(csvText);
     log(`📤 Uploading ${rows.length} rows to Supabase...`);
 
-    const { error: insertError } = await supabase.from(tableName).insert(rows);
-    if (insertError) throw insertError;
+   // --- Instead of direct client insert, send rows to server-side API to handle table creation + insert
+log(`📤 Sending ${rows.length} rows to server for insertion (class=${selectedClass})...`);
+
+const serverResp = await fetch('/api/manageSupabase', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    class: String(selectedClass),
+    tableName,
+    rows
+  })
+});
+
+const serverJson = await serverResp.json();
+if (!serverResp.ok) {
+  log(`❌ Server insert failed: ${serverJson.error || serverJson.message || JSON.stringify(serverJson)}`);
+  throw new Error(serverJson.error || 'Server insert failed');
+}
+
+log(`🎉 Successfully inserted ${rows.length} questions into ${tableName} (server).`);
 
     log(`🎉 Successfully inserted ${rows.length} questions into ${tableName}.`);
     await updateCurriculum(selectedClass, chapter, tableName);
