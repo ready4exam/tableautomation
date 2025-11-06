@@ -1,23 +1,37 @@
 // /api/updateCurriculum.js
+export const config = { runtime: "nodejs" };
+
+function maskToken(tok) {
+  if (!tok) return "<no-token>";
+  return tok.length > 10 ? `${tok.slice(0,6)}...${tok.slice(-4)}` : "<token>";
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Only POST requests allowed" });
   }
 
   try {
-    const { chapterTitle, newId, classNumber } = req.body;
+    const { chapterTitle, newId, classNumber } = req.body || {};
     if (!chapterTitle || !newId) {
       return res.status(400).json({ error: "Missing chapterTitle or newId" });
     }
 
-    const token = process.env.GITHUB_TOKEN;
+    // accept either env var name (PAT or token)
+    const token = process.env.GITHUB_TOKEN || process.env.PERSONAL_ACCESS_TOKEN;
     const owner = process.env.GITHUB_OWNER;
+    if (!token) {
+      console.error("No GitHub token found in env (GITHUB_TOKEN or PERSONAL_ACCESS_TOKEN).");
+      return res.status(500).json({ error: "Server misconfiguration: missing GitHub token" });
+    }
+    console.log("Using GitHub token:", maskToken(token));
+    console.log("GITHUB_OWNER:", owner);
 
-    // 🧠 Dynamically pick the correct repo based on class
+    // dynamic repo mapping
     let repo;
     switch (String(classNumber)) {
       case "9":
-        repo = "ready4exam-9";
+        repo = "ninth"; // your existing repo path under org: ready4exam/ninth
         break;
       case "10":
         repo = "ready4exam-10";
@@ -29,22 +43,30 @@ export default async function handler(req, res) {
         repo = "ready4exam-12";
         break;
       default:
-        repo = process.env.GITHUB_REPO; // fallback
+        repo = process.env.GITHUB_REPO || "ready4exam-test";
     }
 
     const filePath = "js/curriculum.js";
+    const fetchUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`;
+    console.log("Fetching:", fetchUrl);
 
-    // 1️⃣ Fetch current curriculum.js
-    const fileRes = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`,
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
+    const fileRes = await fetch(fetchUrl, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+      },
+    });
 
+    const fileText = await fileRes.text(); // intentionally not json() so we can log HTML errors
     if (!fileRes.ok) {
-      throw new Error(`GitHub fetch failed: ${fileRes.statusText}`);
+      console.error("GitHub fetch failed:", fileRes.status, fileRes.statusText, fileText);
+      return res.status(500).json({
+        error: `GitHub fetch failed: ${fileRes.status} ${fileRes.statusText}`,
+        details: fileText.slice(0, 800), // return first 800 chars for visibility
+      });
     }
 
-    const fileData = await fileRes.json();
+    const fileData = JSON.parse(fileText);
     const content = Buffer.from(fileData.content, "base64").toString("utf-8");
 
     const normalizedTitle = chapterTitle
@@ -63,6 +85,7 @@ export default async function handler(req, res) {
 
         if (normalizedCurrTitle.includes(normalizedTitle)) {
           found = true;
+          console.log("Matched chapter in curriculum:", titleText);
           return match.replace(/id:\s*["'`][^"'`]+["'`]/, `id: "${newId}"`);
         }
         return match;
@@ -70,41 +93,43 @@ export default async function handler(req, res) {
     );
 
     if (!found) {
-      throw new Error(
-        `Chapter title "${chapterTitle}" not found in curriculum.js`
-      );
+      console.error("Chapter not found in curriculum:", chapterTitle);
+      return res.status(404).json({ error: `Chapter "${chapterTitle}" not found in ${repo}` });
     }
 
-    // 4️⃣ Commit updated file
-    const updateRes = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`,
-      {
-        method: "PUT",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          message: `Auto-update ID for "${chapterTitle}" → "${newId}"`,
-          content: Buffer.from(updatedContent).toString("base64"),
-          sha: fileData.sha,
-        }),
-      }
-    );
+    // commit
+    const updateRes = await fetch(fetchUrl, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        Accept: "application/vnd.github+json",
+      },
+      body: JSON.stringify({
+        message: `Auto-update ID for "${chapterTitle}" → "${newId}"`,
+        content: Buffer.from(updatedContent).toString("base64"),
+        sha: fileData.sha,
+      }),
+    });
 
+    const updateText = await updateRes.text();
     if (!updateRes.ok) {
-      throw new Error(`GitHub update failed: ${updateRes.statusText}`);
+      console.error("GitHub update failed:", updateRes.status, updateRes.statusText, updateText.slice(0, 1000));
+      return res.status(500).json({
+        error: `GitHub update failed: ${updateRes.status} ${updateRes.statusText}`,
+        details: updateText.slice(0, 800),
+      });
     }
 
-    const updateData = await updateRes.json();
-
+    const updateData = JSON.parse(updateText);
+    console.log("Commit successful:", updateData.commit?.sha);
     return res.status(200).json({
       message: "✅ curriculum.js updated successfully",
       commitSHA: updateData.commit?.sha || null,
       repoUsed: repo,
     });
-  } catch (error) {
-    console.error("Error:", error);
-    return res.status(500).json({ error: error.message });
+  } catch (err) {
+    console.error("updateCurriculum error:", err);
+    return res.status(500).json({ error: err.message });
   }
 }
