@@ -1,4 +1,4 @@
-// File: /api/_cors.js
+// -------------------- /api/_cors.js --------------------
 export function corsHeaders(origin) {
   const allowedOrigins = [
     "https://ready4exam.github.io",
