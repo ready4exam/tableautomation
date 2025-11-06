@@ -6,6 +6,7 @@ import { supabase } from "./supabaseClient.js";
 
 const GEMINI_API_KEY = "AIzaSyBX5TYNhyMR9S8AODdFkfsJW-vSbVZVI5Y"; // fallback only
 const GEMINI_MODEL = "gemini-2.5-flash";
+const BACKEND_URL = "https://ready4exam-master-automation.vercel.app"; // central automation backend
 
 const classSelect = document.getElementById("classSelect");
 const subjectSelect = document.getElementById("subjectSelect");
@@ -13,7 +14,7 @@ const chapterSelect = document.getElementById("chapterSelect");
 const generateBtn = document.getElementById("generateBtn");
 const logEl = document.getElementById("log");
 
-// ---------------- Logging Helper ----------------
+// ---------- Logging ----------
 const log = (msg) => {
   console.log(msg);
   if (logEl) {
@@ -22,117 +23,71 @@ const log = (msg) => {
   }
 };
 
-// ---------------- Ask Gemini ----------------
+// ---------- Ask Gemini ----------
 async function askGemini(prompt) {
-  // 1️⃣ Try server proxy first
   try {
-    const resp = await fetch("https://ready4exam-master-automation.vercel.app/api/gemini", {
+    const resp = await fetch(`${BACKEND_URL}/api/gemini`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt }),
     });
 
-    if (resp.ok) {
-      const json = await resp.json();
-      const text =
-        json?.candidates?.[0]?.content?.parts?.[0]?.text ||
-        json?.output?.[0]?.content?.parts?.[0]?.text ||
-        JSON.stringify(json);
-      if (text && text.trim()) return text.trim();
-    } else {
-      console.warn(`⚠️ Proxy responded ${resp.status}, fallback to direct Gemini.`);
+    if (!resp.ok) {
+      console.warn(`⚠️ Proxy responded ${resp.status}, fallback to client Gemini.`);
+      throw new Error(`Proxy ${resp.status}`);
     }
-  } catch (err) {
-    console.warn("⚠️ Proxy failed, fallback to client Gemini:", err.message);
-  }
 
-  // 2️⃣ Client fallback (if proxy unavailable)
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
-  const body = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`);
-  const data = await res.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    const json = await resp.json();
+    const text =
+      json?.candidates?.[0]?.content?.parts?.[0]?.text ||
+      json?.output?.[0]?.content?.parts?.[0]?.text ||
+      JSON.stringify(json);
+    return text.trim();
+  } catch (err) {
+    log(`⚠️ askGemini error: ${err.message}`);
+    throw err;
+  }
 }
 
-// ---------------- Extract JSON/Array ----------------
+// ---------- Extract JSON Arrays ----------
 function extractArrayFromText(text) {
   if (!text || typeof text !== "string") return [];
   try {
-    const match = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+    const match = text.match(/\[[\s\S]*\]/);
     if (match) {
-      const jsonText = match[0]
-        .replace(/```(?:json)?/gi, "")
-        .replace(/```/g, "")
-        .trim();
-      const parsed = JSON.parse(jsonText);
-
-      // 🧩 Normalize to simple string array
-      if (Array.isArray(parsed)) {
-        return parsed
-          .map((item) => {
-            if (typeof item === "string") return item;
-            if (typeof item === "object" && item !== null) {
-              const val = Object.values(item).find((v) => typeof v === "string");
-              return val || JSON.stringify(item);
-            }
-            return String(item);
-          })
-          .filter(Boolean);
-      }
-
-      if (parsed.chapters && Array.isArray(parsed.chapters)) {
-        return parsed.chapters.map((c) =>
-          typeof c === "object" ? Object.values(c)[0] : c
-        );
-      }
-      if (parsed.subjects && Array.isArray(parsed.subjects)) {
-        return parsed.subjects.map((s) =>
-          typeof s === "object" ? Object.values(s)[0] : s
-        );
-      }
+      const jsonArray = JSON.parse(match[0]);
+      return Array.isArray(jsonArray)
+        ? jsonArray.map((x) => (typeof x === "string" ? x : Object.values(x)[0]))
+        : [];
     }
-  } catch (e) {
-    console.warn("⚠️ JSON parse failed:", e.message);
+  } catch {
+    console.warn("⚠️ JSON parse fallback");
   }
-
-  // fallback
-  const quoted = Array.from(text.matchAll(/"([^"]+)"/g)).map((m) => m[1]);
-  if (quoted.length) return quoted;
   return text
     .split(/[,;\n]/)
     .map((s) => s.trim())
     .filter(Boolean);
 }
 
-// ---------------- CSV Parser ----------------
+// ---------- CSV Parser ----------
 function parseCSV(csvText) {
-  if (!csvText || typeof csvText !== "string") return [];
   csvText = csvText.replace(/```csv/gi, "").replace(/```/g, "").trim();
   const lines = csvText.split("\n").map((l) => l.trim()).filter(Boolean);
-  if (lines.length < 2) throw new Error("CSV data incomplete");
-
+  if (lines.length < 2) throw new Error("Invalid CSV");
   const headers = lines[0]
     .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
-    .map((h) => h.trim().replace(/^"|"$/g, "").toLowerCase());
-
-  const rows = lines.slice(1).map((line) => {
+    .map((h) => h.trim().replace(/^"|"$/g, ""));
+  return lines.slice(1).map((line) => {
     const cols = line
       .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
       .map((v) => v.trim().replace(/^"|"$/g, ""));
-    const obj = {};
-    headers.forEach((h, i) => (obj[h] = cols[i] || ""));
-    return obj;
+    const row = {};
+    headers.forEach((h, i) => (row[h] = cols[i] || ""));
+    return row;
   });
-
-  return rows.filter((r) => Object.values(r).some((v) => v));
 }
 
-// ---------------- Class Selection ----------------
+// ---------- Class Selection ----------
 classSelect.addEventListener("change", async () => {
   const selectedClass = classSelect.value;
   if (!selectedClass) return;
@@ -141,24 +96,23 @@ classSelect.addEventListener("change", async () => {
   generateBtn.disabled = true;
 
   log(`🔍 Fetching NCERT subjects for Class ${selectedClass}...`);
-  const prompt = `List all NCERT subjects for Class ${selectedClass} in pure JSON array format like ["Science","Mathematics","Social Science","English"].`;
+  const prompt = `List all NCERT subjects for Class ${selectedClass} as a JSON array. Example: ["Science","Mathematics","Social Science","English"].`;
 
   try {
     const text = await askGemini(prompt);
     const subjects = extractArrayFromText(text);
     if (!subjects.length) throw new Error("No subjects found");
+
     subjectSelect.innerHTML = '<option value="">-- Select Subject --</option>';
-    subjects.forEach((s) => {
-      subjectSelect.innerHTML += `<option value="${s}">${s}</option>`;
-    });
+    subjects.forEach((s) => (subjectSelect.innerHTML += `<option value="${s}">${s}</option>`));
     subjectSelect.disabled = false;
     log(`✅ Found ${subjects.length} subjects.`);
   } catch (err) {
-    log(`❌ Failed: ${err.message}`);
+    log(`❌ Failed to fetch subjects: ${err.message}`);
   }
 });
 
-// ---------------- Subject Selection ----------------
+// ---------- Subject Selection ----------
 subjectSelect.addEventListener("change", async () => {
   const selectedClass = classSelect.value;
   const subject = subjectSelect.value;
@@ -167,16 +121,15 @@ subjectSelect.addEventListener("change", async () => {
   generateBtn.disabled = true;
 
   log(`📖 Fetching chapters for ${subject} (Class ${selectedClass})...`);
-  const prompt = `Return ONLY a JSON array of official NCERT chapter titles for Class ${selectedClass}, Subject ${subject}. Each item must be the full chapter title, e.g. "Chapter 1: Matter in Our Surroundings".`;
+  const prompt = `Return only a JSON array of official NCERT chapter titles for Class ${selectedClass}, Subject ${subject}. Example: ["Chapter 1: ...", "Chapter 2: ..."].`;
 
   try {
     const text = await askGemini(prompt);
     const chapters = extractArrayFromText(text);
     if (!chapters.length) throw new Error("No chapters found");
+
     chapterSelect.innerHTML = '<option value="">-- Select Chapter --</option>';
-    chapters.forEach((c) => {
-      chapterSelect.innerHTML += `<option value="${c}">${c}</option>`;
-    });
+    chapters.forEach((c) => (chapterSelect.innerHTML += `<option value="${c}">${c}</option>`));
     chapterSelect.disabled = false;
     log(`✅ Found ${chapters.length} chapters.`);
   } catch (err) {
@@ -184,17 +137,16 @@ subjectSelect.addEventListener("change", async () => {
   }
 });
 
-// ---------------- Chapter Selection ----------------
 chapterSelect.addEventListener("change", () => {
   generateBtn.disabled = !chapterSelect.value;
 });
 
-// ---------------- Generate Questions ----------------
+// ---------- Generate Questions ----------
 generateBtn.addEventListener("click", async () => {
   const selectedClass = classSelect.value;
   const subject = subjectSelect.value;
   const chapter = chapterSelect.value;
-  if (!chapter) return alert("Please select a chapter.");
+  if (!chapter) return alert("Please select a chapter first.");
 
   const tableName = (() => {
     let clean = chapter
@@ -205,7 +157,7 @@ generateBtn.addEventListener("click", async () => {
       .replace(/^_|_$/g, "")
       .trim();
     const words = clean.split("_").filter(Boolean);
-    if (words.length > 2) clean = words.slice(0, 3).join("_");
+    if (words.length > 3) clean = words.slice(0, 3).join("_");
     return clean.endsWith("_quiz") ? clean : `${clean}_quiz`;
   })();
 
@@ -237,8 +189,7 @@ generateBtn.addEventListener("click", async () => {
         END IF;
       END $$;
     `;
-    const { error } = await supabase.rpc("execute_sql", { query: createQuery });
-    if (error) throw error;
+    await supabase.rpc("execute_sql", { query: createQuery });
     log(`✅ Table ${tableName} ready with RLS.`);
   } catch (err) {
     return log(`❌ Table creation failed: ${err.message}`);
@@ -256,19 +207,15 @@ difficulty,question_type,question_text,scenario_reason_text,option_a,option_b,op
     const rows = parseCSV(csvText);
     log(`📤 Sending ${rows.length} rows to server for insertion...`);
 
-    const res = await fetch("https://ready4exam-master-automation.vercel.app/api/manageSupabase", {
+    const res = await fetch(`${BACKEND_URL}/api/manageSupabase`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        class: String(selectedClass),
-        tableName,
-        rows,
-      }),
+      body: JSON.stringify({ class: selectedClass, tableName, rows }),
     });
 
     const j = await res.json();
     if (!res.ok) throw new Error(j.error || JSON.stringify(j));
-    log(`🎉 Successfully inserted ${rows.length} questions into ${tableName}.`);
+    log(`🎉 Successfully inserted ${rows.length} rows into ${tableName}.`);
 
     await updateCurriculum(selectedClass, chapter, tableName);
   } catch (err) {
@@ -276,15 +223,16 @@ difficulty,question_type,question_text,scenario_reason_text,option_a,option_b,op
   }
 });
 
-// ---------------- Update Curriculum ----------------
+// ---------- Update Curriculum ----------
 async function updateCurriculum(className, chapterTitle, newId) {
   try {
     log(`🪶 Updating curriculum.js for Class ${className} → ${chapterTitle} → ${newId}`);
-    const res = await fetch("https://ready4exam-master-automation.vercel.app/api/updateCurriculum", {
+    const res = await fetch(`${BACKEND_URL}/api/updateCurriculum`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ className, chapterTitle, newId }),
     });
+
     const j = await res.json();
     if (!res.ok) throw new Error(j.error || "Update failed");
     log(`✅ curriculum.js committed successfully.`);
