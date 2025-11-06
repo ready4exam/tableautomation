@@ -1,14 +1,17 @@
 // File: /api/gemini.js
 export const config = {
-  runtime: "edge", // Deployed as Vercel Edge Function
+  runtime: "edge", // Fast Vercel Edge Function
 };
 
 export default async function handler(req) {
+  // ✅ Allow all current known frontends
   const allowedOrigins = [
     "https://ready4exam.github.io",
+    "https://ready4exam.github.io/ninth",
+    "https://tableautomation-5iuc-git-main-ready4exams-projects.vercel.app",
     "https://ready4exam-master-automation.vercel.app",
     "http://localhost:5500",
-    "http://127.0.0.1:5500"
+    "http://127.0.0.1:5500",
   ];
 
   const origin = req.headers.get("origin");
@@ -20,7 +23,6 @@ export default async function handler(req) {
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
   };
 
-  // ✅ Handle CORS preflight correctly
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
   }
@@ -34,14 +36,12 @@ export default async function handler(req) {
 
   const apiKey = process.env.google_api;
   if (!apiKey) {
-    console.error("❌ Missing google_api key in environment");
-    return new Response(JSON.stringify({ error: "Missing API key" }), {
+    return new Response(JSON.stringify({ error: "Missing google_api key" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
-  // ✅ Parse body safely
   let body;
   try {
     body = await req.json();
@@ -52,7 +52,7 @@ export default async function handler(req) {
     });
   }
 
-  const { prompt, class: classValue = "9", tableName, rows = [] } = body || {};
+  const { prompt, tableName, rows, class: classValue = "9" } = body || {};
   if (!prompt) {
     return new Response(JSON.stringify({ error: "Missing prompt" }), {
       status: 400,
@@ -63,8 +63,6 @@ export default async function handler(req) {
   const payload = { contents: [{ parts: [{ text: prompt }] }] };
 
   try {
-    console.log(`🧠 Gemini request for Class ${classValue}...`);
-
     const response = await fetch(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
       {
@@ -86,37 +84,30 @@ export default async function handler(req) {
     }
 
     if (!response.ok) {
-      console.error("❌ Gemini API Error:", data);
-      return new Response(
-        JSON.stringify({ error: "Gemini API failed", data }),
-        {
-          status: response.status,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
+      return new Response(JSON.stringify({ error: "Gemini API failed", data }), {
+        status: response.status,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    // ✅ Forward to manageSupabase if rows provided
-    if (rows.length > 0 && tableName) {
-      console.log(`📤 Forwarding ${rows.length} rows to manageSupabase for class ${classValue}`);
-      try {
-        await fetch("https://ready4exam-master-automation.vercel.app/api/manageSupabase", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ class: classValue, tableName, rows }),
-        });
-      } catch (e) {
-        console.warn("⚠️ manageSupabase forward failed:", e.message);
-      }
+    // ✅ Optional forwarding to Supabase manager
+    if (rows?.length && tableName) {
+      const url = process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}/api/manageSupabase`
+        : "http://localhost:3000/api/manageSupabase";
+
+      await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ class: classValue, tableName, rows }),
+      });
     }
 
-    console.log("✅ Gemini success");
     return new Response(JSON.stringify(data), {
       status: 200,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (err) {
-    console.error("🔥 Internal error:", err);
     return new Response(JSON.stringify({ error: err.message }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
