@@ -6,50 +6,33 @@ export const config = { runtime: "nodejs" };
 
 export default async function handler(req, res) {
   const origin = req.headers.origin || "";
-  const headers = corsHeaders(origin);
+  const headers = { ...corsHeaders(origin), "Content-Type": "application/json" };
   res.set(headers);
 
-  // Preflight
   if (req.method === "OPTIONS") return res.status(200).end();
-
-  // Method check
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Only POST method allowed" });
-  }
+  if (req.method !== "POST") return res.status(405).json({ error: "Only POST allowed" });
 
   try {
-    const { class: classValue, tableName, rows } = req.body || {};
+    const { class: classValue, tableName, rows } = req.body;
 
-    if (!tableName || !Array.isArray(rows) || rows.length === 0) {
+    if (!tableName || !Array.isArray(rows) || rows.length === 0)
       return res.status(400).json({ error: "Invalid request body" });
-    }
 
-    // 🧭 Choose Supabase credentials dynamically
+    // Select credentials by class
     let supabaseUrl, supabaseKey;
-
-    switch (String(classValue)) {
-      case "11":
-        supabaseUrl = process.env.SUPABASE_URL_11;
-        supabaseKey = process.env.SUPABASE_SERVICE_KEY_11;
-        break;
-      case "10":
-        supabaseUrl = process.env.SUPABASE_URL_10;
-        supabaseKey = process.env.SUPABASE_SERVICE_KEY_10;
-        break;
-      case "9":
-      default:
-        supabaseUrl = process.env.SUPABASE_URL_9;
-        supabaseKey = process.env.SUPABASE_SERVICE_KEY_9;
-        break;
+    if (classValue === "11") {
+      supabaseUrl = process.env.SUPABASE_URL_11;
+      supabaseKey = process.env.SUPABASE_SERVICE_KEY_11;
+    } else {
+      supabaseUrl = process.env.SUPABASE_URL_9;
+      supabaseKey = process.env.SUPABASE_SERVICE_KEY_9;
     }
 
-    if (!supabaseUrl || !supabaseKey) {
+    if (!supabaseUrl || !supabaseKey)
       throw new Error(`Missing Supabase credentials for class ${classValue}`);
-    }
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // ✅ Create table + enable RLS + open access policies
     const createQuery = `
       CREATE TABLE IF NOT EXISTS public.${tableName} (
         id BIGSERIAL PRIMARY KEY,
@@ -64,36 +47,27 @@ export default async function handler(req, res) {
         correct_answer_key TEXT,
         created_at TIMESTAMP DEFAULT NOW()
       );
-
       ALTER TABLE public.${tableName} ENABLE ROW LEVEL SECURITY;
-
       DO $$
       BEGIN
         IF NOT EXISTS (
           SELECT 1 FROM pg_policies WHERE tablename = '${tableName}'
         ) THEN
-          CREATE POLICY "Enable all access"
-          ON public.${tableName}
-          FOR ALL
-          TO anon, authenticated
-          USING (true)
-          WITH CHECK (true);
+          CREATE POLICY "Allow all access" ON public.${tableName}
+          FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
         END IF;
       END $$;
     `;
 
     await supabase.rpc("execute_sql", { query: createQuery });
 
-    // ✅ Insert generated rows
     const { error: insertError } = await supabase.from(tableName).insert(rows);
     if (insertError) throw insertError;
 
-    console.log(`✅ Inserted ${rows.length} rows into ${tableName} (Class ${classValue})`);
-    return res.status(200).json({
-      message: `✅ ${rows.length} rows inserted into ${tableName} (Class ${classValue})`,
-    });
+    console.log(`✅ Inserted ${rows.length} rows into ${tableName}`);
+    return res.status(200).json({ message: `Inserted ${rows.length} rows into ${tableName}` });
   } catch (err) {
-    console.error("❌ manageSupabase error:", err.message);
+    console.error("❌ manageSupabase error:", err);
     return res.status(500).json({ error: err.message });
   }
 }
