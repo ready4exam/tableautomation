@@ -1,18 +1,17 @@
 // ------------------- Gemini Frontend Automation -------------------
-// Works with Supabase and Gemini 2.5 Flash
+// Works with Supabase + Gemini 2.5 Flash + Vercel backend APIs
 // Creates RLS-enabled tables, uploads generated quiz data,
 // and updates curriculum.js reference IDs automatically.
 
-import { supabase } from "./supabaseClient.js";
+// 🔹 No import from "./supabaseClient.js" since automation now uses backend /api/manageSupabase
+// (that keeps your keys safe server-side)
 
-const GEMINI_API_KEY = "AIzaSyBX5TYNhyMR9S8AODdFkfsJW-vSbVZVI5Y"; // Keep your current key
 const GEMINI_MODEL = "gemini-2.5-flash";
-
+const logEl = document.getElementById("log");
 const classSelect = document.getElementById("classSelect");
 const subjectSelect = document.getElementById("subjectSelect");
 const chapterSelect = document.getElementById("chapterSelect");
 const generateBtn = document.getElementById("generateBtn");
-const logEl = document.getElementById("log");
 
 // ---------- Logger ----------
 const log = (msg) => {
@@ -23,7 +22,7 @@ const log = (msg) => {
   }
 };
 
-// ---------- Gemini Proxy Call ----------
+// ---------- Ask Gemini via Server Proxy ----------
 async function askGemini(prompt) {
   try {
     const proxyResp = await fetch("/api/gemini", {
@@ -39,14 +38,14 @@ async function askGemini(prompt) {
         proxyJson?.output?.[0]?.content?.parts?.[0]?.text ||
         JSON.stringify(proxyJson);
       if (outputText && outputText.trim()) return outputText.trim();
-    } else {
-      console.warn(`⚠️ Proxy responded ${proxyResp.status}, fallback to client call.`);
     }
+    console.warn(`⚠️ Proxy responded ${proxyResp.status}, fallback to direct Gemini.`);
   } catch (err) {
-    console.warn("⚠️ Proxy failed, fallback to client:", err);
+    console.warn("⚠️ Proxy failed:", err.message);
   }
 
-  // Fallback direct Gemini call (only used if proxy fails)
+  // ⚙️ Fallback direct call (only if proxy fails)
+  const GEMINI_API_KEY = "YOUR_GEMINI_API_KEY";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
   const body = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
 
@@ -55,7 +54,6 @@ async function askGemini(prompt) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-
   if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`);
   const data = await res.json();
   return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
@@ -84,42 +82,24 @@ function extractArrayFromText(text) {
   return text.split(/[,;\n]/).map((s) => s.trim()).filter(Boolean);
 }
 
-// ---------- CSV Parser (Fixed version) ----------
+// ---------- CSV Parser ----------
 function parseCSV(csvText) {
   if (!csvText || typeof csvText !== "string") return [];
-
-  // Clean code fences
   csvText = csvText.replace(/```csv/gi, "").replace(/```/g, "").trim();
-
-  const lines = csvText
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l && !l.startsWith("#"));
-
-  if (lines.length < 2) throw new Error("CSV data incomplete or empty");
-
-  let headers = lines[0]
+  const lines = csvText.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (lines.length < 2) throw new Error("CSV data incomplete");
+  const headers = lines[0]
     .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
     .map((h) => h.trim().replace(/^"|"$/g, "").toLowerCase());
-
-  // Normalize column names
-  const headerMap = {
-    reason_text: "scenario_reason_text",
-    scenario: "scenario_reason_text",
-    rationale: "scenario_reason_text",
-  };
-  headers = headers.map((h) => headerMap[h] || h);
-
   const rows = lines.slice(1).map((line) => {
     const cols = line
       .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
       .map((v) => v.trim().replace(/^"|"$/g, ""));
-    const row = {};
-    headers.forEach((h, i) => (row[h] = cols[i] || ""));
-    return row;
+    const obj = {};
+    headers.forEach((h, i) => (obj[h] = cols[i] || ""));
+    return obj;
   });
-
-  return rows.filter((r) => Object.values(r).some((v) => v));
+  return rows;
 }
 
 // ---------- Handle Class Selection ----------
@@ -131,19 +111,17 @@ classSelect.addEventListener("change", async () => {
   generateBtn.disabled = true;
 
   log(`🔍 Fetching NCERT subjects for Class ${selectedClass}...`);
-  const prompt = `List all NCERT subjects for Class ${selectedClass} as a pure JSON array like ["Science","Math","Social Science","English"].`;
+  const prompt = `List all NCERT subjects for Class ${selectedClass} in JSON array format like ["Science","Math","English"].`;
 
   try {
     const text = await askGemini(prompt);
     const subjects = extractArrayFromText(text);
     subjectSelect.innerHTML = '<option value="">-- Select Subject --</option>';
-    subjects.forEach((s) => {
-      subjectSelect.innerHTML += `<option value="${s}">${s}</option>`;
-    });
+    subjects.forEach((s) => (subjectSelect.innerHTML += `<option>${s}</option>`));
     subjectSelect.disabled = false;
     log(`✅ Found ${subjects.length} subjects.`);
   } catch (err) {
-    log(`❌ Failed to fetch subjects: ${err.message}`);
+    log(`❌ Failed: ${err.message}`);
   }
 });
 
@@ -156,101 +134,64 @@ subjectSelect.addEventListener("change", async () => {
   generateBtn.disabled = true;
 
   log(`📖 Fetching chapters for ${subject} (Class ${selectedClass})...`);
-  const prompt = `Return ONLY a JSON array of NCERT chapters for Class ${selectedClass}, Subject ${subject}. Each item is "Chapter X: Title".`;
+  const prompt = `Return a JSON array of official NCERT chapters for Class ${selectedClass}, Subject ${subject}.`;
 
   try {
     const text = await askGemini(prompt);
     const chapters = extractArrayFromText(text);
     chapterSelect.innerHTML = '<option value="">-- Select Chapter --</option>';
-    chapters.forEach((c) => {
-      chapterSelect.innerHTML += `<option value="${c}">${c}</option>`;
-    });
+    chapters.forEach((c) => (chapterSelect.innerHTML += `<option>${c}</option>`));
     chapterSelect.disabled = false;
     log(`✅ Found ${chapters.length} chapters.`);
   } catch (err) {
-    log(`❌ Failed to fetch chapters: ${err.message}`);
+    log(`❌ Failed: ${err.message}`);
   }
 });
 
-chapterSelect.addEventListener("change", () => {
-  generateBtn.disabled = !chapterSelect.value;
-});
-
-// ---------- Generate Questions ----------
+// ---------- Generate Quiz ----------
 generateBtn.addEventListener("click", async () => {
   const selectedClass = classSelect.value;
   const subject = subjectSelect.value;
   const chapter = chapterSelect.value;
   if (!chapter) return alert("Please select a chapter.");
 
+  // 👇 Intelligent table name creation
   const tableName = chapter
     .toLowerCase()
     .replace(/chapter\s*\d+[:\-]?\s*/i, "")
     .replace(/[^\w]+/g, "_")
     .replace(/_+/g, "_")
     .replace(/^_|_$/g, "")
+    .split("_")
+    .slice(0, 2)
+    .join("_")
     .concat("_quiz");
 
   log(`🧾 Preparing table: ${tableName}`);
 
   try {
-    const createQuery = `
-      CREATE TABLE IF NOT EXISTS public.${tableName} (
-        id SERIAL PRIMARY KEY,
-        difficulty TEXT,
-        question_type TEXT,
-        question_text TEXT,
-        scenario_reason_text TEXT,
-        option_a TEXT,
-        option_b TEXT,
-        option_c TEXT,
-        option_d TEXT,
-        correct_answer_key TEXT,
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-      ALTER TABLE public.${tableName} ENABLE ROW LEVEL SECURITY;
-    `;
-    const { error } = await supabase.rpc("execute_sql", { query: createQuery });
-    if (error) throw error;
-    log(`✅ Table ${tableName} ready with RLS.`);
-  } catch (err) {
-    return log(`❌ Table creation failed: ${err.message}`);
-  }
-
-  log(`📚 Generating 60 questions for ${subject} → ${chapter}...`);
-  const prompt = `
+    log(`📚 Generating 60 questions for ${subject} → ${chapter}...`);
+    const prompt = `
 Generate exactly 60 unique quiz questions for Class ${selectedClass}, Subject ${subject}, Chapter ${chapter}.
-Return ONLY CSV (no markdown, no backticks) with headers:
+Return ONLY a valid CSV (no markdown) with headers:
 difficulty,question_type,question_text,scenario_reason_text,option_a,option_b,option_c,option_d,correct_answer_key
 `;
 
-  try {
     const csvText = await askGemini(prompt);
     const rows = parseCSV(csvText);
-    log(`📤 Uploading ${rows.length} rows to Supabase...`);
+    log(`📤 Sending ${rows.length} rows to server (class=${selectedClass})...`);
 
-   // --- Instead of direct client insert, send rows to server-side API to handle table creation + insert
-log(`📤 Sending ${rows.length} rows to server for insertion (class=${selectedClass})...`);
+    // ✅ Always call secure backend API
+    const resp = await fetch("/api/manageSupabase", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ class: selectedClass, tableName, rows }),
+    });
 
-const serverResp = await fetch('/api/manageSupabase', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    class: String(selectedClass),
-    tableName,
-    rows
-  })
-});
+    const result = await resp.json();
+    if (!resp.ok) throw new Error(result.error || result.message);
+    log(`🎉 ${result.message || "Questions uploaded successfully."}`);
 
-const serverJson = await serverResp.json();
-if (!serverResp.ok) {
-  log(`❌ Server insert failed: ${serverJson.error || serverJson.message || JSON.stringify(serverJson)}`);
-  throw new Error(serverJson.error || 'Server insert failed');
-}
-
-log(`🎉 Successfully inserted ${rows.length} questions into ${tableName} (server).`);
-
-    log(`🎉 Successfully inserted ${rows.length} questions into ${tableName}.`);
     await updateCurriculum(selectedClass, chapter, tableName);
   } catch (err) {
     log(`❌ Error: ${err.message}`);
@@ -260,15 +201,15 @@ log(`🎉 Successfully inserted ${rows.length} questions into ${tableName} (serv
 // ---------- Update curriculum.js ----------
 async function updateCurriculum(className, chapterTitle, newId) {
   try {
-    log(`🪶 Updating curriculum.js for Class ${className} → Chapter: ${chapterTitle} → ${newId}`);
+    log(`🪶 Updating curriculum.js for Class ${className} → ${chapterTitle}`);
     const res = await fetch("/api/updateCurriculum", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ className, chapterTitle, newId }),
     });
     const j = await res.json();
-    if (!res.ok) throw new Error(j.error || "Update failed");
-    log(`✅ curriculum.js committed successfully.`);
+    if (!res.ok) throw new Error(j.error || "Commit failed");
+    log(`✅ curriculum.js updated successfully.`);
   } catch (err) {
     log(`❌ curriculum commit failed: ${err.message}`);
   }
