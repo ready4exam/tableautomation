@@ -2,57 +2,41 @@
 import { corsHeaders } from "./_cors.js";
 
 export const config = {
-  runtime: "edge", // ✅ Fast Vercel Edge Function
+  runtime: "nodejs", // ✅ Use Node.js for longer Gemini API calls
 };
 
-export default async function handler(req) {
-  const origin = req.headers.get("origin") || "";
+export default async function handler(req, res) {
+  const origin = req.headers.origin || "";
   const headers = { ...corsHeaders(origin), "Content-Type": "application/json" };
 
   // Handle preflight
   if (req.method === "OPTIONS") {
-    return new Response(null, { status: 200, headers });
+    return res.status(200).set(headers).end();
   }
 
   // Only POST allowed
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Only POST method allowed" }), {
-      status: 405,
-      headers,
-    });
+    return res.status(405).set(headers).json({ error: "Only POST method allowed" });
   }
 
-  // Read API key
   const apiKey = process.env.google_api;
   if (!apiKey) {
-    return new Response(JSON.stringify({ error: "Missing google_api environment variable" }), {
-      status: 500,
-      headers,
-    });
+    return res.status(500).set(headers).json({ error: "Missing google_api env var" });
   }
 
-  // Parse request body
   let body;
   try {
-    body = await req.json();
+    body = req.body;
   } catch {
-    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
-      status: 400,
-      headers,
-    });
+    return res.status(400).set(headers).json({ error: "Invalid JSON body" });
   }
 
   const { prompt, class: classValue = "9" } = body;
   if (!prompt) {
-    return new Response(JSON.stringify({ error: "Missing prompt" }), {
-      status: 400,
-      headers,
-    });
+    return res.status(400).set(headers).json({ error: "Missing prompt" });
   }
 
-  const payload = {
-    contents: [{ parts: [{ text: prompt }] }],
-  };
+  const payload = { contents: [{ parts: [{ text: prompt }] }] };
 
   try {
     console.log(`🧠 Gemini API call (Class ${classValue})...`);
@@ -79,19 +63,16 @@ export default async function handler(req) {
 
     if (!response.ok) {
       console.error("❌ Gemini API Error:", data);
-      return new Response(
-        JSON.stringify({ error: "Gemini API failed", data }),
-        { status: response.status, headers }
-      );
+      return res.status(response.status).set(headers).json({
+        error: "Gemini API failed",
+        data,
+      });
     }
 
     console.log("✅ Gemini success");
-    return new Response(JSON.stringify(data), { status: 200, headers });
+    return res.status(200).set(headers).json(data);
   } catch (err) {
     console.error("🔥 Internal Gemini error:", err);
-    return new Response(JSON.stringify({ error: err.message }), {
-      status: 500,
-      headers,
-    });
+    return res.status(500).set(headers).json({ error: err.message });
   }
 }
