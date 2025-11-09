@@ -1,192 +1,196 @@
-// js/gemini_frontend.js
-// Ready4Exam Unified Frontend Controller (Gemini + Supabase + Curriculum Sync)
+// ---------------- Developer Automation Frontend ----------------
+// Aligned with Ready4Exam Phase-2 unified Supabase_11 backend
+// Calls: /api/gemini, /api/manageSupabase, /api/updateCurriculum
 
-const API_BASE = "https://ready4exam-master-automation.vercel.app/api"; // backend base
+const baseAPI = "https://ready4exam-master-automation.vercel.app/api";
+const baseStatic = "https://ready4exam-master-automation.vercel.app/static_curriculum";
 
-// UI element references
 const classSelect = document.getElementById("classSelect");
 const subjectSelect = document.getElementById("subjectSelect");
+const bookSelect = document.getElementById("bookSelect");
+const bookContainer = document.getElementById("bookContainer");
 const chapterSelect = document.getElementById("chapterSelect");
 const generateBtn = document.getElementById("generateBtn");
+const refreshBtn = document.getElementById("refreshBtn");
 const logEl = document.getElementById("log");
 
-// Global state
-let curriculumData = {};
-let generatedData = { csv: null, meta: null };
-
-// ---------- Utility ----------
-function log(msg, type = "info") {
-  const time = new Date().toLocaleTimeString();
-  const color =
-    type === "error" ? "#f87171" :
-    type === "success" ? "#4ade80" :
-    type === "warn" ? "#facc15" : "#93c5fd";
-  logEl.innerHTML += `<span style="color:${color}">[${time}] ${msg}</span>\n`;
+function log(msg) {
+  console.log(msg);
+  logEl.value += msg + "\n";
   logEl.scrollTop = logEl.scrollHeight;
 }
 
-function sanitizeFileName(s) {
-  return (s || "").toLowerCase().replace(/[^a-z0-9]/g, "_").slice(0, 80);
-}
+// ---------------- Load Curriculum ----------------
+classSelect.addEventListener("change", async () => {
+  const classValue = classSelect.value;
+  if (!classValue) return;
 
-// ---------- Load Curriculum ----------
-async function loadCurriculum() {
-  log("📘 Loading curriculum data...");
-  try {
-    // Option A: Local JSON (for testing)
-    const res = await fetch("./curriculum.json");
-
-    if (!res.ok) throw new Error("Unable to fetch curriculum.json");
-    curriculumData = await res.json();
-
-    log("✅ Curriculum loaded successfully.");
-  } catch (err) {
-    log("❌ Failed to load curriculum: " + err.message, "error");
-  }
-}
-
-// ---------- Dropdown Logic ----------
-function populateSubjects(classValue) {
-  subjectSelect.innerHTML = `<option value="">-- Select Subject --</option>`;
-  chapterSelect.innerHTML = `<option value="">-- Select Chapter --</option>`;
+  subjectSelect.innerHTML = '<option value="">-- Select Subject --</option>';
+  chapterSelect.innerHTML = '<option value="">-- Select Chapter --</option>';
+  bookContainer.classList.add("hidden");
+  bookSelect.innerHTML = '<option value="">-- Select Book --</option>';
   subjectSelect.disabled = true;
   chapterSelect.disabled = true;
   generateBtn.disabled = true;
-
-  if (!classValue || !curriculumData[classValue]) return;
-
-  Object.keys(curriculumData[classValue]).forEach((subject) => {
-    const opt = document.createElement("option");
-    opt.value = subject;
-    opt.textContent = subject;
-    subjectSelect.appendChild(opt);
-  });
-
-  subjectSelect.disabled = false;
-}
-
-function populateChapters(classValue, subjectValue) {
-  chapterSelect.innerHTML = `<option value="">-- Select Chapter --</option>`;
-  chapterSelect.disabled = true;
-  generateBtn.disabled = true;
-
-  if (!subjectValue || !curriculumData[classValue]?.[subjectValue]) return;
-
-  curriculumData[classValue][subjectValue].forEach((chapter) => {
-    const opt = document.createElement("option");
-    opt.value = chapter;
-    opt.textContent = chapter;
-    chapterSelect.appendChild(opt);
-  });
-
-  chapterSelect.disabled = false;
-}
-
-function enableGenerateButton() {
-  generateBtn.disabled =
-    !classSelect.value || !subjectSelect.value || !chapterSelect.value;
-}
-
-// ---------- Phase 1: Gemini Question Generation ----------
-async function generateQuiz() {
-  const cls = classSelect.value;
-  const subject = subjectSelect.value;
-  const chapter = chapterSelect.value;
-
-  if (!cls || !subject || !chapter) {
-    log("⚠️ Please select class, subject, and chapter before running.", "warn");
-    return;
-  }
-
-  generateBtn.disabled = true;
-  log(`🚀 Starting generation for Class ${cls} — ${subject}: ${chapter}`);
+  refreshBtn.disabled = true;
+  log(`📚 Loading curriculum for Class ${classValue}...`);
 
   try {
-    const res = await fetch(`${API_BASE}/gemini`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ class: cls, subject, chapter }),
+    const res = await fetch(`${baseStatic}/class${classValue}/curriculum.json`);
+    if (!res.ok) throw new Error(`Failed to fetch curriculum for class ${classValue}`);
+    const curriculum = await res.json();
+
+    subjectSelect.innerHTML = '<option value="">-- Select Subject --</option>';
+    Object.keys(curriculum).forEach(sub => {
+      subjectSelect.innerHTML += `<option value="${sub}">${sub}</option>`;
     });
+    subjectSelect.disabled = false;
+    log(`✅ Subjects loaded for Class ${classValue}.`);
+  } catch (err) {
+    log(`❌ Error loading curriculum: ${err.message}`);
+  }
+});
 
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Gemini generation failed");
+// ---------------- Subject → Book / Chapter ----------------
+subjectSelect.addEventListener("change", async () => {
+  const classValue = classSelect.value;
+  const subjectValue = subjectSelect.value;
+  if (!subjectValue) return;
 
-    generatedData.csv = data.csv;
-    generatedData.meta = data.meta || {
-      class: cls,
-      subject,
-      chapter,
-      tableName: `${subject}_${chapter}`.toLowerCase().replace(/[^a-z0-9]+/g, "_"),
+  const res = await fetch(`${baseStatic}/class${classValue}/curriculum.json`);
+  const curriculum = await res.json();
+
+  if (["11", "12"].includes(classValue)) {
+    // Classes 11-12 have book layers
+    const books = Object.keys(curriculum[subjectValue] || {});
+    bookSelect.innerHTML = '<option value="">-- Select Book --</option>';
+    books.forEach(b => (bookSelect.innerHTML += `<option value="${b}">${b}</option>`));
+    bookContainer.classList.remove("hidden");
+    chapterSelect.disabled = true;
+    generateBtn.disabled = true;
+  } else {
+    // Classes 5–10
+    bookContainer.classList.add("hidden");
+    const chapters = curriculum[subjectValue] || [];
+    fillChapterDropdown(chapters);
+  }
+});
+
+bookSelect.addEventListener("change", async () => {
+  const classValue = classSelect.value;
+  const subjectValue = subjectSelect.value;
+  const bookValue = bookSelect.value;
+  if (!bookValue) return;
+
+  const res = await fetch(`${baseStatic}/class${classValue}/curriculum.json`);
+  const curriculum = await res.json();
+
+  const chapters = curriculum[subjectValue]?.[bookValue] || [];
+  fillChapterDropdown(chapters);
+});
+
+function fillChapterDropdown(chapters) {
+  chapterSelect.innerHTML = '<option value="">-- Select Chapter --</option>';
+  chapters.forEach(ch => {
+    chapterSelect.innerHTML += `<option value="${ch.chapter_title}">${ch.chapter_title}</option>`;
+  });
+  chapterSelect.disabled = false;
+  generateBtn.disabled = false;
+  refreshBtn.disabled = false;
+}
+
+// ---------------- API Helpers ----------------
+async function callGemini(prompt) {
+  const res = await fetch(`${baseAPI}/gemini`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt }),
+  });
+  const data = await res.json();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  if (!text) throw new Error("Empty Gemini response");
+  return text;
+}
+
+function parseCSV(csv) {
+  const [header, ...lines] = csv.split("\n").filter(l => l.trim());
+  const headers = header.split(",").map(h => h.trim().replace(/^"|"$/g, ""));
+  return lines.map(line => {
+    const cols = line.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map(c => c.trim().replace(/^"|"$/g, ""));
+    const obj = {};
+    headers.forEach((h, i) => (obj[h] = cols[i] || ""));
+    return obj;
+  });
+}
+
+async function updateCurriculum(classValue, chapterTitle, tableName) {
+  const body = { className: classValue, chapterTitle, newId: tableName };
+  const res = await fetch(`${baseAPI}/updateCurriculum`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return await res.json();
+}
+
+// ---------------- Generate or Refresh ----------------
+async function handleGeneration(isRefresh = false) {
+  const classValue = classSelect.value;
+  const subject = subjectSelect.value;
+  const book = ["11", "12"].includes(classValue) ? bookSelect.value : "";
+  const chapter = chapterSelect.value;
+  if (!chapter) return alert("Please select a chapter.");
+
+  const tableName = [
+    `class${classValue}`,
+    subject.toLowerCase().replace(/\s+/g, "_"),
+    book ? book.toLowerCase().replace(/\s+/g, "_") : "",
+    chapter.toLowerCase().replace(/[^a-z0-9]+/g, "_"),
+    "quiz",
+  ]
+    .filter(Boolean)
+    .join("_");
+
+  log(`🧠 Generating 60 questions for ${subject} → ${chapter}`);
+  try {
+    const prompt = `
+Generate 60 unique quiz questions for Class ${classValue}, Subject ${subject}${
+      book ? `, Book ${book}` : ""
+    }, Chapter ${chapter}.
+Return ONLY CSV with headers:
+difficulty,question_type,question_text,scenario_reason_text,option_a,option_b,option_c,option_d,correct_answer_key
+Distribution:
+- Simple: 20 (10 MCQ, 5 AR, 5 Case)
+- Medium: 20 (10 MCQ, 5 AR, 5 Case)
+- Advanced: 20 (10 MCQ, 5 AR, 5 Case)
+`;
+
+    const csvText = await callGemini(prompt);
+    const rows = parseCSV(csvText);
+    log(`✅ Gemini returned ${rows.length} rows.`);
+
+    const manageBody = {
+      meta: { className: classValue, subject, book, chapter, refresh: isRefresh },
+      csv: rows,
     };
 
-    log("✅ Gemini generation successful.", "success");
-    log(`📄 Generated table name: ${generatedData.meta.tableName}`);
-
-    await uploadToSupabase(); // trigger next phase
-  } catch (err) {
-    log("❌ Gemini Error: " + err.message, "error");
-  } finally {
-    generateBtn.disabled = false;
-  }
-}
-
-// ---------- Phase 2: Upload to Supabase ----------
-async function uploadToSupabase() {
-  if (!generatedData.csv || !generatedData.meta) {
-    log("⚠️ No data to upload. Generate first.", "warn");
-    return;
-  }
-
-  log("📤 Uploading to Supabase...");
-  try {
-    const res = await fetch(`${API_BASE}/manageSupabase`, {
+    const res = await fetch(`${baseAPI}/manageSupabase`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(generatedData),
+      body: JSON.stringify(manageBody),
     });
 
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Upload failed");
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || "Upload failed");
+    log(`📤 ${rows.length} questions uploaded to Supabase table '${tableName}'.`);
 
-    log(`✅ Supabase upload successful. Table: ${data.table}`, "success");
-    log(`📊 Rows inserted: ${data.rows}`);
-
-    await syncCurriculum(); // next phase
+    const updateRes = await updateCurriculum(classValue, chapter, tableName);
+    if (updateRes.error) throw new Error(updateRes.error);
+    log(`🪶 Curriculum updated. Commit: ${updateRes.commitSHA || "n/a"}`);
   } catch (err) {
-    log("❌ Supabase Error: " + err.message, "error");
+    log(`❌ Error: ${err.message}`);
   }
 }
 
-// ---------- Phase 3: Curriculum Sync ----------
-async function syncCurriculum() {
-  if (!generatedData.meta) {
-    log("⚠️ No metadata found for curriculum update.", "warn");
-    return;
-  }
-
-  log("🔄 Syncing curriculum with backend...");
-  try {
-    const res = await fetch(`${API_BASE}/updateCurriculum`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ meta: generatedData.meta }),
-    });
-
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Curriculum sync failed");
-
-    log("✅ Curriculum successfully updated.", "success");
-    log("🎉 Full automation completed!");
-  } catch (err) {
-    log("❌ Curriculum Sync Error: " + err.message, "error");
-  }
-}
-
-// ---------- Event Bindings ----------
-classSelect.addEventListener("change", (e) => populateSubjects(e.target.value));
-subjectSelect.addEventListener("change", (e) =>
-  populateChapters(classSelect.value, e.target.value)
-);
-chapterSelect.addEventListener("change", enableGenerateButton);
-generateBtn.addEventListener("click", generateQuiz);
-window.addEventListener("DOMContentLoaded", loadCurriculum);
+generateBtn.addEventListener("click", () => handleGeneration(false));
+refreshBtn.addEventListener("click", () => handleGeneration(true));
