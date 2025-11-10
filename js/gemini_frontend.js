@@ -176,12 +176,15 @@ async function handleGenerateOrRefresh(isRefresh = false) {
 
   const apiURL = `https://ready4exam-master-automation.vercel.app/api/manageSupabase`;
   const payload = {
+     meta: {
     class_name: classValue,
     subject: subjectValue,
     book: bookValue,
     chapter: chapterValue,
     refresh: isRefresh
-  };
+  },
+      csv: generatedQuestionsArray  // must be an array of question objects
+};
 
   try {
     log(isRefresh ? "🔄 Refreshing question set..." : "⚙️ Generating question set...");
