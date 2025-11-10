@@ -4,8 +4,6 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Ready4Exam – Developer Automation Tool</title>
-
-  <!-- Tailwind -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -31,16 +29,15 @@
     </div>
   </header>
 
-  <!-- Main Content -->
+  <!-- Main -->
   <main class="max-w-4xl mx-auto p-6 space-y-6">
-
-    <!-- Curriculum Loader Section -->
+    <!-- Curriculum Loader -->
     <section class="bg-white shadow-md rounded-xl p-6">
       <h2 class="text-2xl font-bold mb-4 text-cbse-blue">Curriculum Loader</h2>
 
       <!-- Dropdowns -->
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <!-- Class Dropdown -->
+        <!-- Class -->
         <div>
           <label class="block text-sm font-semibold mb-1">Select Class</label>
           <select id="classSelect" class="w-full border border-gray-300 rounded-lg p-2">
@@ -56,63 +53,59 @@
           </select>
         </div>
 
-        <!-- Subject Dropdown -->
+        <!-- Subject -->
         <div>
           <label class="block text-sm font-semibold mb-1">Select Subject</label>
-          <select id="subjectSelect" disabled class="w-full border border-gray-300 rounded-lg p-2">
+          <select id="subjectSelect" class="w-full border border-gray-300 rounded-lg p-2" disabled>
             <option value="">-- Select Subject --</option>
           </select>
         </div>
 
-        <!-- Book Dropdown (for 11-12 only) -->
+        <!-- Book -->
         <div id="bookContainer" class="hidden">
-          <label class="block text-sm font-semibold mb-1">Select Book (11–12 only)</label>
+          <label class="block text-sm font-semibold mb-1">Select Book</label>
           <select id="bookSelect" class="w-full border border-gray-300 rounded-lg p-2">
             <option value="">-- Select Book --</option>
           </select>
         </div>
       </div>
 
-      <!-- Chapter Dropdown -->
+      <!-- Chapter -->
       <div class="mt-4">
         <label class="block text-sm font-semibold mb-1">Select Chapter</label>
-        <select id="chapterSelect" disabled class="w-full border border-gray-300 rounded-lg p-2">
+        <select id="chapterSelect" class="w-full border border-gray-300 rounded-lg p-2" disabled>
           <option value="">-- Select Chapter --</option>
         </select>
       </div>
 
-      <!-- Buttons -->
-      <div class="flex space-x-4 mt-6">
-        <button id="generateBtn" disabled class="px-6 py-2 bg-cbse-blue text-white rounded-lg hover:bg-blue-800 transition">
-          Generate & Upload Questions
+      <!-- Action Buttons -->
+      <div class="flex gap-4 mt-6">
+        <button id="generateBtn"
+          class="bg-cbse-blue text-white px-5 py-2 rounded-lg shadow disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled>
+          🚀 Generate Questions
         </button>
-        <button id="refreshBtn" disabled class="px-6 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition">
-          Refresh Questions
+        <button id="refreshBtn"
+          class="bg-accent-gold text-black px-5 py-2 rounded-lg shadow disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled>
+          🔄 Refresh Table
         </button>
       </div>
     </section>
 
-    <!-- Developer Log Section -->
+    <!-- Logs -->
     <section class="bg-white shadow-md rounded-xl p-6">
-      <h2 class="text-2xl font-bold mb-4 text-cbse-blue">Developer Log</h2>
-      <textarea
-        id="log"
-        readonly
-        class="w-full h-72 border border-gray-300 rounded-lg p-3 font-mono text-sm"
-        placeholder="Logs will appear here..."
-      ></textarea>
+      <h2 class="text-xl font-bold mb-2 text-cbse-blue">Logs</h2>
+      <textarea id="log" readonly
+        class="w-full h-60 border border-gray-300 rounded-lg p-3 text-sm font-mono bg-gray-50"></textarea>
     </section>
-
   </main>
 
-  <!-- Footer -->
-  <footer class="text-center text-gray-500 py-4">
-    <p class="text-sm">
-      Ready4Exam Developer Tool – A part of the Ready4Industry initiative
-    </p>
+  <footer class="text-center text-xs text-gray-500 py-4">
+    Ready4Exam Developer Tool © 2025 | For internal use only
   </footer>
 
-  <!-- Script Link -->
-  <script type="module" src="./js/gemini_frontend.js"></script>
+  <!-- Main Script -->
+  <script src="js/gemini_frontend.js"></script>
 </body>
 </html>
