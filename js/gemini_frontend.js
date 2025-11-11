@@ -1,10 +1,11 @@
 // ----------------------------
-// Ready4Exam Developer Tool (Phase-2 Automation with Gemini Integration)
+// Ready4Exam Developer Tool (Phase-2 Automation)
+// Full Integration: Gemini → Supabase (Stable Backend)
 // ----------------------------
 
 const baseStatic = "https://ready4exam-master-automation.vercel.app/static_curriculum";
 
-// 🔹 Element References
+// 🔹 UI Elements
 const classSelect = document.getElementById("classSelect");
 const subjectSelect = document.getElementById("subjectSelect");
 const bookContainer = document.getElementById("bookContainer");
@@ -82,128 +83,4 @@ subjectSelect.addEventListener("change", async () => {
       const chapters = subjectData[firstBook] || [];
       fillChapterDropdown(chapters);
       bookContainer.classList.add("hidden");
-      log(`📗 Chapters loaded for ${subjectValue} (${firstBook}).`);
-    }
-  } catch (err) {
-    log(`❌ ${err.message}`);
-  }
-});
-
-// ------------------------------------------------
-// 3️⃣ Book → Chapters
-// ------------------------------------------------
-bookSelect.addEventListener("change", async () => {
-  const classValue = classSelect.value;
-  const subjectValue = subjectSelect.value;
-  const bookValue = bookSelect.value;
-  if (!bookValue) return;
-
-  const res = await fetch(`${baseStatic}/class${classValue}/curriculum.json`);
-  const curriculum = await res.json();
-  const chapters = curriculum[subjectValue]?.[bookValue] || [];
-  fillChapterDropdown(chapters);
-  log(`📗 Chapters loaded for ${subjectValue} → ${bookValue}`);
-});
-
-function fillChapterDropdown(chapters) {
-  chapterSelect.innerHTML = '<option value="">-- Select Chapter --</option>';
-  chapters.forEach((ch) => {
-    const title = ch.chapter_title || ch.title || "Untitled Chapter";
-    chapterSelect.innerHTML += `<option value="${title}">${title}</option>`;
-  });
-  chapterSelect.disabled = false;
-  generateBtn.disabled = false;
-  refreshBtn.disabled = false;
-}
-
-// ------------------------------------------------
-// 4️⃣ Generate or Refresh Quiz
-// ------------------------------------------------
-generateBtn.addEventListener("click", () => handleGenerateOrRefresh(false));
-refreshBtn.addEventListener("click", () => handleGenerateOrRefresh(true));
-
-async function handleGenerateOrRefresh(isRefresh) {
-  const classValue = classSelect.value;
-  const subjectValue = subjectSelect.value;
-  const bookValue = bookSelect.value || "N/A";
-  const chapterValue = chapterSelect.value;
-
-  if (!classValue || !subjectValue || !chapterValue) {
-    log("⚠️ Please select all fields first.");
-    return;
-  }
-
-  try {
-    // -----------------------------
-    // Step 1 – Ask Gemini to generate questions
-    // -----------------------------
-    log(isRefresh ? "🔄 Refreshing question set..." : "⚙️ Generating question set via Gemini...");
-    const geminiRes = await fetch("https://ready4exam-master-automation.vercel.app/api/gemini", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        meta: {
-          class_name: classValue,
-          subject: subjectValue,
-          book: bookValue,
-          chapter: chapterValue,
-          num: 60,
-          difficulty: "medium"
-        }
-      }),
-    });
-
-    const geminiData = await geminiRes.json();
-    if (!geminiData.ok || !Array.isArray(geminiData.questions)) throw new Error("Gemini generation failed.");
-    const generatedQuestionsArray = geminiData.questions;
-    log(`✅ Gemini generated ${generatedQuestionsArray.length} questions.`);
-
-    // -----------------------------
-    // Step 2 – Upload to Supabase (manageSupabase)
-    // -----------------------------
-    log("📤 Uploading questions to Supabase...");
-    const uploadRes = await fetch("https://ready4exam-master-automation.vercel.app/api/manageSupabase", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        meta: {
-          class_name: classValue,
-          subject: subjectValue,
-          book: bookValue,
-          chapter: chapterValue,
-          refresh: isRefresh
-        },
-        csv: generatedQuestionsArray,
-      }),
-    });
-
-    const uploadData = await uploadRes.json();
-    if (!uploadData.ok) throw new Error(uploadData.error || "Upload failed");
-    log(`✅ ${uploadData.message}`);
-
-    // -----------------------------
-    // Step 3 – Verify Mapping
-    // -----------------------------
-    log("🔍 Verifying mapping...");
-    const mapRes = await fetch("https://ready4exam-master-automation.vercel.app/api/getMapping", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        class_name: classValue,
-        subject: subjectValue,
-        chapter: chapterValue,
-      }),
-    });
-
-    const mapData = await mapRes.json();
-    if (mapData.ok && mapData.table_name) {
-      log(`🔗 Verified mapping: ${chapterValue} → ${mapData.table_name}`);
-      log(`✅ Quiz ready. You can now open quiz-engine.html?table=${mapData.table_name}`);
-    } else {
-      log(`⚠️ No mapping found for ${chapterValue} (table may be ${uploadData.table}).`);
-      log(`🔗 Try opening quiz-engine.html?table=${uploadData.table}`);
-    }
-  } catch (err) {
-    log(`❌ Error: ${err.message}`);
-  }
-}
+      log(`📗 Chapters
