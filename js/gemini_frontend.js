@@ -83,4 +83,106 @@ subjectSelect.addEventListener("change", async () => {
       const chapters = subjectData[firstBook] || [];
       fillChapterDropdown(chapters);
       bookContainer.classList.add("hidden");
-      log(`📗 Chapters
+      log(`📗 Chapters loaded for ${subjectValue} (${firstBook}).`);
+    }
+  } catch (err) {
+    log(`❌ ${err.message}`);
+  }
+});
+
+// ------------------------------------------------
+// 3️⃣ Book → Chapters
+// ------------------------------------------------
+bookSelect.addEventListener("change", async () => {
+  const classValue = classSelect.value;
+  const subjectValue = subjectSelect.value;
+  const bookValue = bookSelect.value;
+  if (!bookValue) return;
+
+  const res = await fetch(`${baseStatic}/class${classValue}/curriculum.json`);
+  const curriculum = await res.json();
+  const chapters = curriculum[subjectValue]?.[bookValue] || [];
+  fillChapterDropdown(chapters);
+  log(`📗 Chapters loaded for ${subjectValue} → ${bookValue}`);
+});
+
+function fillChapterDropdown(chapters) {
+  chapterSelect.innerHTML = '<option value="">-- Select Chapter --</option>';
+  chapters.forEach((ch) => {
+    const title = ch.chapter_title || ch.title || "Untitled Chapter";
+    chapterSelect.innerHTML += `<option value="${title}">${title}</option>`;
+  });
+  chapterSelect.disabled = false;
+  generateBtn.disabled = false;
+  refreshBtn.disabled = false;
+}
+
+// ------------------------------------------------
+// 4️⃣ Generate or Refresh Quiz
+// ------------------------------------------------
+generateBtn.addEventListener("click", () => handleGenerateOrRefresh(false));
+refreshBtn.addEventListener("click", () => handleGenerateOrRefresh(true));
+
+async function handleGenerateOrRefresh(isRefresh) {
+  const classValue = classSelect.value;
+  const subjectValue = subjectSelect.value;
+  const bookValue = bookSelect.value || "N/A";
+  const chapterValue = chapterSelect.value;
+
+  if (!classValue || !subjectValue || !chapterValue) {
+    log("⚠️ Please select all fields first.");
+    return;
+  }
+
+  try {
+    // Step 1 – Generate from Gemini
+    log(isRefresh ? "🔄 Refreshing question set..." : "⚙️ Generating question set via Gemini...");
+    const geminiRes = await fetch("https://ready4exam-master-automation.vercel.app/api/gemini", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        meta: {
+          class_name: classValue,
+          subject: subjectValue,
+          book: bookValue,
+          chapter: chapterValue,
+          num: 60,
+          difficulty: "medium",
+        },
+      }),
+    });
+
+    const geminiData = await geminiRes.json();
+    if (!geminiData.ok || !Array.isArray(geminiData.questions)) throw new Error(geminiData.error || "Gemini generation failed.");
+    log(`✅ Gemini generated ${geminiData.questions.length} questions.`);
+
+    // Step 2 – Upload to Supabase
+    log("📤 Uploading to Supabase...");
+    const uploadRes = await fetch("https://ready4exam-master-automation.vercel.app/api/manageSupabase", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        meta: {
+          class_name: classValue,
+          subject: subjectValue,
+          book: bookValue,
+          chapter: chapterValue,
+          refresh: isRefresh,
+        },
+        csv: geminiData.questions,
+      }),
+    });
+
+    const uploadData = await uploadRes.json();
+    if (!uploadRes.ok || !uploadData.ok) throw new Error(uploadData.error || "Supabase upload failed.");
+
+    log(`✅ Supabase upload complete: ${uploadData.message}`);
+
+    // Step 3 – Final Verification Log
+    log("🔗 Table successfully created/updated in Supabase.");
+    log("✅ Full automation flow completed successfully.");
+
+  } catch (err) {
+    log(`❌ Error: ${err.message}`);
+  }
+}
