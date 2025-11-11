@@ -1,195 +1,124 @@
-// ----------------------------
-// Ready4Exam Developer Tool
-// Frontend Script (Phase-2 Automation with Mapping Integration)
-// ----------------------------
+// static/js/gemini_frontend.js
+// Minimal UI bindings; adapt selectors to your page
+(async () => {
+  // Utility
+  function $qs(sel) { return document.querySelector(sel); }
+  function $qsa(sel) { return Array.from(document.querySelectorAll(sel)); }
 
-const baseStatic = "https://ready4exam-master-automation.vercel.app/static_curriculum";
+  // Replace these selectors with your actual UI elements
+  const classInput = $qs("#className"); // input/select
+  const subjectInput = $qs("#subject");
+  const bookInput = $qs("#book");
+  const chapterInput = $qs("#chapter");
+  const numInput = $qs("#numQuestions") || { value: 20 };
+  const difficultyInput = $qs("#difficulty") || { value: "medium" };
+  const generateBtn = $qs("#generateBtn");
+  const previewDiv = $qs("#preview");
+  const uploadBtn = $qs("#uploadBtn");
+  const statusDiv = $qs("#status");
 
-// 🔹 Element References
-const classSelect = document.getElementById("classSelect");
-const subjectSelect = document.getElementById("subjectSelect");
-const bookContainer = document.getElementById("bookContainer");
-const bookSelect = document.getElementById("bookSelect");
-const chapterSelect = document.getElementById("chapterSelect");
-const generateBtn = document.getElementById("generateBtn");
-const refreshBtn = document.getElementById("refreshBtn");
-const logBox = document.getElementById("log");
+  function setStatus(t) { if (statusDiv) statusDiv.innerText = t; else console.log(t); }
 
-// 🔹 Logger
-function log(...args) {
-  const msg = args.join(" ");
-  console.log(msg);
-  logBox.value += msg + "\n";
-  logBox.scrollTop = logBox.scrollHeight;
-}
+  // hold latest generated questions
+  let lastQuestions = [];
 
-// ------------------------------------------------
-// 1️⃣ Load Curriculum
-// ------------------------------------------------
-classSelect.addEventListener("change", async () => {
-  const classValue = classSelect.value;
-  subjectSelect.innerHTML = '<option value="">-- Select Subject --</option>';
-  bookSelect.innerHTML = '<option value="">-- Select Book --</option>';
-  chapterSelect.innerHTML = '<option value="">-- Select Chapter --</option>';
-  subjectSelect.disabled = true;
-  bookContainer.classList.add("hidden");
-  chapterSelect.disabled = true;
-  generateBtn.disabled = true;
-  refreshBtn.disabled = true;
-
-  if (!classValue) return;
-
-  try {
-    log(`📚 Loading curriculum for Class ${classValue}...`);
-    const res = await fetch(`${baseStatic}/class${classValue}/curriculum.json`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const curriculum = await res.json();
-
-    const subjects = Object.keys(curriculum);
-    subjects.forEach((sub) => {
-      subjectSelect.innerHTML += `<option value="${sub}">${sub}</option>`;
+  async function callGemini(meta) {
+    setStatus("Requesting Gemini...");
+    const r = await fetch("/api/gemini", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ meta }),
     });
-
-    subjectSelect.disabled = false;
-    log(`✅ Subjects loaded for Class ${classValue}.`);
-  } catch (err) {
-    log(`❌ ${err.message}`);
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || "Gemini failed");
+    return j.questions;
   }
-});
 
-// ------------------------------------------------
-// 2️⃣ Subject → Book / Chapters
-// ------------------------------------------------
-subjectSelect.addEventListener("change", async () => {
-  const classValue = classSelect.value;
-  const subjectValue = subjectSelect.value;
-  if (!subjectValue) return;
+  async function uploadToSupabase(meta, csv) {
+    setStatus("Uploading to Supabase...");
+    const r = await fetch("/api/manageSupabase", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ meta, csv }),
+    });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || "Upload failed");
+    return j;
+  }
 
-  try {
-    const res = await fetch(`${baseStatic}/class${classValue}/curriculum.json`);
-    const curriculum = await res.json();
-    const subjectData = curriculum[subjectValue];
+  function renderPreview(items) {
+    if (!previewDiv) return;
+    previewDiv.innerHTML = "";
+    items.slice(0, 10).forEach((q, idx) => {
+      const el = document.createElement("div");
+      el.className = "q-preview";
+      el.innerHTML = `<strong>${idx+1}. ${q.question_text}</strong>
+        <div>A) ${q.option_a}</div>
+        <div>B) ${q.option_b}</div>
+        <div>C) ${q.option_c}</div>
+        <div>D) ${q.option_d}</div>
+        <div><em>Answer: ${q.correct_answer_key}</em></div>
+        <div class="reason">${q.scenario_reason_text}</div>
+        <hr/>`;
+      previewDiv.appendChild(el);
+    });
+  }
 
-    if (["11", "12"].includes(classValue)) {
-      const books = Object.keys(subjectData);
-      bookSelect.innerHTML = '<option value="">-- Select Book --</option>';
-      books.forEach((b) => (bookSelect.innerHTML += `<option value="${b}">${b}</option>`));
-      bookContainer.classList.remove("hidden");
-      chapterSelect.disabled = true;
-      log(`📘 Books loaded for ${subjectValue}.`);
-    } else {
-      const books = Object.keys(subjectData);
-      const firstBook = books[0];
-      const chapters = subjectData[firstBook] || [];
-      fillChapterDropdown(chapters);
-      bookContainer.classList.add("hidden");
-      log(`📗 Chapters loaded for ${subjectValue} (${firstBook}).`);
+  if (generateBtn) generateBtn.addEventListener("click", async (e) => {
+    try {
+      setStatus("Gathering inputs...");
+      const meta = {
+        class_name: classInput.value,
+        subject: subjectInput.value,
+        book: bookInput.value || "",
+        chapter: chapterInput.value,
+        num: parseInt(numInput.value || 20, 10),
+        difficulty: difficultyInput.value || "medium",
+      };
+      setStatus("Calling Gemini...");
+      const questions = await callGemini(meta);
+      lastQuestions = questions;
+      renderPreview(questions);
+      setStatus(`Generated ${questions.length} questions. Preview shown. Click Upload to save.`);
+      if (uploadBtn) uploadBtn.disabled = false;
+    } catch (err) {
+      console.error(err);
+      setStatus("Error: " + (err.message || err));
     }
-  } catch (err) {
-    log(`❌ ${err.message}`);
-  }
-});
-
-// ------------------------------------------------
-// 3️⃣ Book → Chapters
-// ------------------------------------------------
-bookSelect.addEventListener("change", async () => {
-  const classValue = classSelect.value;
-  const subjectValue = subjectSelect.value;
-  const bookValue = bookSelect.value;
-  if (!bookValue) return;
-
-  const res = await fetch(`${baseStatic}/class${classValue}/curriculum.json`);
-  const curriculum = await res.json();
-  const chapters = curriculum[subjectValue]?.[bookValue] || [];
-  fillChapterDropdown(chapters);
-  log(`📗 Chapters loaded for ${subjectValue} → ${bookValue}`);
-});
-
-function fillChapterDropdown(chapters) {
-  chapterSelect.innerHTML = '<option value="">-- Select Chapter --</option>';
-  chapters.forEach((ch) => {
-    const title = ch.chapter_title || ch.title || "Untitled Chapter";
-    chapterSelect.innerHTML += `<option value="${title}">${title}</option>`;
   });
-  chapterSelect.disabled = false;
-  generateBtn.disabled = false;
-  refreshBtn.disabled = false;
-}
 
-// ------------------------------------------------
-// 4️⃣ Generate or Refresh Quiz
-// ------------------------------------------------
-generateBtn.addEventListener("click", () => handleGenerateOrRefresh(false));
-refreshBtn.addEventListener("click", () => handleGenerateOrRefresh(true));
-
-async function handleGenerateOrRefresh(isRefresh) {
-  const classValue = classSelect.value;
-  const subjectValue = subjectSelect.value;
-  const bookValue = bookSelect.value || "N/A";
-  const chapterValue = chapterSelect.value;
-
-  if (!classValue || !subjectValue || !chapterValue) {
-    log("⚠️ Please select all fields first.");
-    return;
-  }
-
-  try {
-    // -----------------------------
-    // Step 1 – Ask Gemini to generate questions
-    // -----------------------------
-    log(isRefresh ? "🔄 Refreshing question set..." : "⚙️ Generating 60-question set...");
-    const geminiRes = await fetch("https://ready4exam-master-automation.vercel.app/api/gemini", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ class_name: classValue, subject: subjectValue, book: bookValue, chapter: chapterValue }),
-    });
-    const geminiData = await geminiRes.json();
-    if (!geminiData.ok || !geminiData.questions) throw new Error("Gemini generation failed.");
-    const generatedQuestionsArray = geminiData.questions;
-    log(`✅ Gemini generated ${generatedQuestionsArray.length} questions.`);
-
-    // -----------------------------
-    // Step 2 – Upload to Supabase (manageSupabase)
-    // -----------------------------
-    const uploadRes = await fetch("https://ready4exam-master-automation.vercel.app/api/manageSupabase", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        meta: {
-          class_name: classValue,
-          subject: subjectValue,
-          book: bookValue,
-          chapter: chapterValue,
-          refresh: isRefresh,
-        },
-        csv: generatedQuestionsArray,
-      }),
-    });
-
-    const uploadData = await uploadRes.json();
-    if (!uploadRes.ok) throw new Error(uploadData.error || "Upload failed");
-    log(`✅ ${uploadData.message}`);
-
-    // -----------------------------
-    // Step 3 – Verify Mapping (new)
-    // -----------------------------
-    const mapRes = await fetch("https://ready4exam-master-automation.vercel.app/api/getMapping", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        class_name: classValue,
-        subject: subjectValue,
-        chapter: chapterValue,
-      }),
-    });
-    const mapData = await mapRes.json();
-    if (mapData.ok && mapData.table_name) {
-      log(`🔗 Verified mapping: ${chapterValue} → ${mapData.table_name}`);
-    } else {
-      log(`⚠️ No mapping found for ${chapterValue}`);
+  if (uploadBtn) uploadBtn.addEventListener("click", async (e) => {
+    try {
+      if (!lastQuestions || lastQuestions.length === 0) {
+        setStatus("No generated questions to upload.");
+        return;
+      }
+      setStatus("Uploading...");
+      const meta = {
+        class_name: classInput.value,
+        subject: subjectInput.value,
+        book: bookInput.value || "",
+        chapter: chapterInput.value,
+        refresh: true,
+      };
+      const resp = await uploadToSupabase(meta, lastQuestions);
+      setStatus(`Upload succeeded: ${resp.message}`);
+      // show link to quiz viewer
+      const table = resp.table;
+      const link = document.createElement("a");
+      link.href = `/static/quiz-engine.html?table=${encodeURIComponent(table)}`;
+      link.innerText = "Open Quiz Viewer";
+      previewDiv.appendChild(link);
+    } catch (err) {
+      console.error(err);
+      setStatus("Upload failed: " + (err.message || err));
     }
-  } catch (err) {
-    log(`❌ Error: ${err.message}`);
-  }
-}
+  });
+
+  // quick auto-fill for development
+  document.addEventListener("DOMContentLoaded", () => {
+    if (classInput) classInput.value = classInput.value || "class11";
+    if (subjectInput) subjectInput.value = subjectInput.value || "Physics";
+    if (chapterInput) chapterInput.value = chapterInput.value || "Motion in a Straight Line";
+  });
+})();
