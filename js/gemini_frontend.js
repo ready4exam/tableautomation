@@ -1,188 +1,112 @@
-// ----------------------------
-// Ready4Exam Developer Tool (Phase-2 Automation)
-// Full Integration: Gemini → Supabase (Stable Backend)
-// ----------------------------
+// ✅ /api/gemini.js — Final Production-Ready Parser (Stable)
+// Supports plain JSON, Markdown JSON, escaped JSON, and nested Gemini responses
 
-const baseStatic = "https://ready4exam-master-automation.vercel.app/static_curriculum";
+import { getCorsHeaders } from "./cors.js";
+export const config = { runtime: "nodejs" };
 
-// 🔹 UI Elements
-const classSelect = document.getElementById("classSelect");
-const subjectSelect = document.getElementById("subjectSelect");
-const bookContainer = document.getElementById("bookContainer");
-const bookSelect = document.getElementById("bookSelect");
-const chapterSelect = document.getElementById("chapterSelect");
-const generateBtn = document.getElementById("generateBtn");
-const refreshBtn = document.getElementById("refreshBtn");
-const logBox = document.getElementById("log");
+export default async function handler(req, res) {
+  const origin = req.headers.origin || "*";
+  const headers = { ...getCorsHeaders(origin), "Content-Type": "application/json" };
+  for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
 
-// 🔹 Logger
-function log(...args) {
-  const msg = args.join(" ");
-  console.log(msg);
-  logBox.value += msg + "\n";
-  logBox.scrollTop = logBox.scrollHeight;
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).json({ error: "Only POST allowed" });
+
+  try {
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    const { meta } = body || {};
+    if (!meta) throw new Error("Missing 'meta' field.");
+
+    const { class_name, subject, book, chapter, num = 5, difficulty = "medium" } = meta;
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error("Missing GEMINI_API_KEY in environment variables.");
+
+    const prompt = `
+Generate ${num} multiple-choice questions in pure JSON.
+Each question must have:
+difficulty, question_type, question_text, scenario_reason_text, option_a, option_b, option_c, option_d, correct_answer_key.
+Subject: ${subject}
+Book: ${book}
+Chapter: ${chapter}
+Difficulty: ${difficulty}
+Return only valid JSON, no markdown or explanations.
+Format:
+{
+  "questions": [ { "difficulty": "...", "question_type": "...", ... } ]
 }
+`;
 
-// ------------------------------------------------
-// 1️⃣ Load Curriculum
-// ------------------------------------------------
-classSelect.addEventListener("change", async () => {
-  const classValue = classSelect.value;
-  subjectSelect.innerHTML = '<option value="">-- Select Subject --</option>';
-  bookSelect.innerHTML = '<option value="">-- Select Book --</option>';
-  chapterSelect.innerHTML = '<option value="">-- Select Chapter --</option>';
-  subjectSelect.disabled = true;
-  bookContainer.classList.add("hidden");
-  chapterSelect.disabled = true;
-  generateBtn.disabled = true;
-  refreshBtn.disabled = true;
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+        }),
+      }
+    );
 
-  if (!classValue) return;
+    const rawText = await geminiRes.text();
+    console.log("🧾 GEMINI RAW:", rawText.substring(0, 500));
 
-  try {
-    log(`📚 Loading curriculum for Class ${classValue}...`);
-    const res = await fetch(`${baseStatic}/class${classValue}/curriculum.json`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const curriculum = await res.json();
+    // ----------------------------
+    // 🧠 UNIVERSAL JSON EXTRACTOR
+    // ----------------------------
+    function extractJSON(text) {
+      if (!text) throw new Error("Empty response from Gemini.");
+      // 1️⃣ Try direct JSON
+      try {
+        return JSON.parse(text);
+      } catch (_) {}
 
-    const subjects = Object.keys(curriculum);
-    subjects.forEach((sub) => {
-      subjectSelect.innerHTML += `<option value="${sub}">${sub}</option>`;
-    });
+      // 2️⃣ Try Markdown-style code block
+      const mdMatch = text.match(/```(?:json)?([\s\S]*?)```/i);
+      if (mdMatch) {
+        try {
+          return JSON.parse(mdMatch[1]);
+        } catch (_) {}
+      }
 
-    subjectSelect.disabled = false;
-    log(`✅ Subjects loaded for Class ${classValue}.`);
-  } catch (err) {
-    log(`❌ ${err.message}`);
-  }
-});
+      // 3️⃣ Try first {...} block
+      const blockMatch = text.match(/\{[\s\S]*\}/);
+      if (blockMatch) {
+        try {
+          return JSON.parse(blockMatch[0]);
+        } catch (_) {}
+      }
 
-// ------------------------------------------------
-// 2️⃣ Subject → Book / Chapters
-// ------------------------------------------------
-subjectSelect.addEventListener("change", async () => {
-  const classValue = classSelect.value;
-  const subjectValue = subjectSelect.value;
-  if (!subjectValue) return;
-
-  try {
-    const res = await fetch(`${baseStatic}/class${classValue}/curriculum.json`);
-    const curriculum = await res.json();
-    const subjectData = curriculum[subjectValue];
-
-    if (["11", "12"].includes(classValue)) {
-      const books = Object.keys(subjectData);
-      bookSelect.innerHTML = '<option value="">-- Select Book --</option>';
-      books.forEach((b) => (bookSelect.innerHTML += `<option value="${b}">${b}</option>`));
-      bookContainer.classList.remove("hidden");
-      chapterSelect.disabled = true;
-      log(`📘 Books loaded for ${subjectValue}.`);
-    } else {
-      const books = Object.keys(subjectData);
-      const firstBook = books[0];
-      const chapters = subjectData[firstBook] || [];
-      fillChapterDropdown(chapters);
-      bookContainer.classList.add("hidden");
-      log(`📗 Chapters loaded for ${subjectValue} (${firstBook}).`);
+      // 4️⃣ Clean escaped quotes and retry
+      const cleaned = text.replace(/\\"/g, '"').replace(/\\n/g, "").trim();
+      try {
+        return JSON.parse(cleaned);
+      } catch (_) {
+        throw new Error("No valid JSON structure found.");
+      }
     }
+
+    // ----------------------------
+    // 🧩 PARSE GEMINI RESPONSE
+    // ----------------------------
+    let jsonText = "";
+    try {
+      const outer = JSON.parse(rawText);
+      jsonText =
+        outer?.candidates?.[0]?.content?.parts?.[0]?.text ||
+        outer?.output_text ||
+        rawText;
+    } catch {
+      jsonText = rawText;
+    }
+
+    const parsed = extractJSON(jsonText);
+    const questions = Array.isArray(parsed?.questions) ? parsed.questions : [];
+
+    if (!questions.length) throw new Error("Failed to parse Gemini JSON output.");
+
+    return res.status(200).json({ ok: true, questions });
   } catch (err) {
-    log(`❌ ${err.message}`);
-  }
-});
-
-// ------------------------------------------------
-// 3️⃣ Book → Chapters
-// ------------------------------------------------
-bookSelect.addEventListener("change", async () => {
-  const classValue = classSelect.value;
-  const subjectValue = subjectSelect.value;
-  const bookValue = bookSelect.value;
-  if (!bookValue) return;
-
-  const res = await fetch(`${baseStatic}/class${classValue}/curriculum.json`);
-  const curriculum = await res.json();
-  const chapters = curriculum[subjectValue]?.[bookValue] || [];
-  fillChapterDropdown(chapters);
-  log(`📗 Chapters loaded for ${subjectValue} → ${bookValue}`);
-});
-
-function fillChapterDropdown(chapters) {
-  chapterSelect.innerHTML = '<option value="">-- Select Chapter --</option>';
-  chapters.forEach((ch) => {
-    const title = ch.chapter_title || ch.title || "Untitled Chapter";
-    chapterSelect.innerHTML += `<option value="${title}">${title}</option>`;
-  });
-  chapterSelect.disabled = false;
-  generateBtn.disabled = false;
-  refreshBtn.disabled = false;
-}
-
-// ------------------------------------------------
-// 4️⃣ Generate or Refresh Quiz
-// ------------------------------------------------
-generateBtn.addEventListener("click", () => handleGenerateOrRefresh(false));
-refreshBtn.addEventListener("click", () => handleGenerateOrRefresh(true));
-
-async function handleGenerateOrRefresh(isRefresh) {
-  const classValue = classSelect.value;
-  const subjectValue = subjectSelect.value;
-  const bookValue = bookSelect.value || "N/A";
-  const chapterValue = chapterSelect.value;
-
-  if (!classValue || !subjectValue || !chapterValue) {
-    log("⚠️ Please select all fields first.");
-    return;
-  }
-
-  try {
-    // Step 1 – Generate from Gemini
-    log(isRefresh ? "🔄 Refreshing question set..." : "⚙️ Generating question set via Gemini...");
-    const geminiRes = await fetch("https://ready4exam-master-automation.vercel.app/api/gemini", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        meta: {
-          class_name: classValue,
-          subject: subjectValue,
-          book: bookValue,
-          chapter: chapterValue,
-          num: 60,
-          difficulty: "medium",
-        },
-      }),
-    });
-
-    const geminiData = await geminiRes.json();
-    if (!geminiData.ok || !Array.isArray(geminiData.questions)) throw new Error(geminiData.error || "Gemini generation failed.");
-    log(`✅ Gemini generated ${geminiData.questions.length} questions.`);
-
-    // Step 2 – Upload to Supabase
-    log("📤 Uploading to Supabase...");
-    const uploadRes = await fetch("https://ready4exam-master-automation.vercel.app/api/manageSupabase", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        meta: {
-          class_name: classValue,
-          subject: subjectValue,
-          book: bookValue,
-          chapter: chapterValue,
-          refresh: isRefresh,
-        },
-        csv: geminiData.questions,
-      }),
-    });
-
-    const uploadData = await uploadRes.json();
-    if (!uploadRes.ok || !uploadData.ok) throw new Error(uploadData.error || "Supabase upload failed.");
-
-    log(`✅ Supabase upload complete: ${uploadData.message}`);
-
-    // Step 3 – Final Verification Log
-    log("🔗 Table successfully created/updated in Supabase.");
-    log("✅ Full automation flow completed successfully.");
-
-  } catch (err) {
-    log(`❌ Error: ${err.message}`);
+    console.error("❌ /api/gemini.js error:", err);
+    return res.status(500).json({ ok: false, error: err.message });
   }
 }
