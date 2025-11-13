@@ -1,143 +1,112 @@
-// gemini_frontend.js — Phase-2 Working Version (Fixed for ES Module Loading)
+// ✅ /api/gemini.js — Final Production-Ready Parser (Stable)
+// Supports plain JSON, Markdown JSON, escaped JSON, and nested Gemini responses
 
-import { ENV } from "./config.js";
+import { getCorsHeaders } from "./cors.js";
+export const config = { runtime: "nodejs" };
 
-console.log("🚀 tableautomation: gemini_frontend.js loaded");
+export default async function handler(req, res) {
+  const origin = req.headers.origin || "*";
+  const headers = { ...getCorsHeaders(origin), "Content-Type": "application/json" };
+  for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
 
-// Render UI
-document.getElementById("app").innerHTML = `
-  <div class="space-y-4">
-    <label class="block">
-      <span class="font-semibold">Select Class</span>
-      <select id="classSelect" class="border p-2 rounded w-full">
-        <option value="">-- Choose Class --</option>
-        <option>class11</option>
-        <option>class12</option>
-      </select>
-    </label>
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).json({ error: "Only POST allowed" });
 
-    <label class="block">
-      <span class="font-semibold">Subject</span>
-      <select id="subjectSelect" class="border p-2 rounded w-full"></select>
-    </label>
+  try {
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    const { meta } = body || {};
+    if (!meta) throw new Error("Missing 'meta' field.");
 
-    <label class="block">
-      <span class="font-semibold">Book</span>
-      <select id="bookSelect" class="border p-2 rounded w-full"></select>
-    </label>
+    const { class_name, subject, book, chapter, num = 5, difficulty = "medium" } = meta;
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error("Missing GEMINI_API_KEY in environment variables.");
 
-    <label class="block">
-      <span class="font-semibold">Chapter</span>
-      <select id="chapterSelect" class="border p-2 rounded w-full"></select>
-    </label>
-
-    <button id="generateBtn" class="bg-blue-600 text-white px-4 py-2 rounded">
-      Generate & Upload
-    </button>
-
-    <pre id="logBox" class="bg-gray-100 p-3 h-64 overflow-auto text-sm"></pre>
-  </div>
+    const prompt = `
+Generate ${num} multiple-choice questions in pure JSON.
+Each question must have:
+difficulty, question_type, question_text, scenario_reason_text, option_a, option_b, option_c, option_d, correct_answer_key.
+Subject: ${subject}
+Book: ${book}
+Chapter: ${chapter}
+Difficulty: ${difficulty}
+Return only valid JSON, no markdown or explanations.
+Format:
+{
+  "questions": [ { "difficulty": "...", "question_type": "...", ... } ]
+}
 `;
 
-// Log helper
-const log = (m) => {
-  document.getElementById("logBox").textContent += m + "\n";
-};
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+        }),
+      }
+    );
 
-// Dropdown references
-const classSelect = document.getElementById("classSelect");
-const subjectSelect = document.getElementById("subjectSelect");
-const bookSelect = document.getElementById("bookSelect");
-const chapterSelect = document.getElementById("chapterSelect");
-const generateBtn = document.getElementById("generateBtn");
+    const rawText = await geminiRes.text();
+    console.log("🧾 GEMINI RAW:", rawText.substring(0, 500));
 
-// Load curriculum JSON
-classSelect.addEventListener("change", async () => {
-  const cls = classSelect.value;
+    // ----------------------------
+    // 🧠 UNIVERSAL JSON EXTRACTOR
+    // ----------------------------
+    function extractJSON(text) {
+      if (!text) throw new Error("Empty response from Gemini.");
+      // 1️⃣ Try direct JSON
+      try {
+        return JSON.parse(text);
+      } catch (_) {}
 
-  if (!cls) return;
+      // 2️⃣ Try Markdown-style code block
+      const mdMatch = text.match(/```(?:json)?([\s\S]*?)```/i);
+      if (mdMatch) {
+        try {
+          return JSON.parse(mdMatch[1]);
+        } catch (_) {}
+      }
 
-  log("📚 Loading subjects...");
+      // 3️⃣ Try first {...} block
+      const blockMatch = text.match(/\{[\s\S]*\}/);
+      if (blockMatch) {
+        try {
+          return JSON.parse(blockMatch[0]);
+        } catch (_) {}
+      }
 
-  const res = await fetch(
-    `${ENV.BACKEND_API}/static_curriculum/${cls}/curriculum.json`
-  );
+      // 4️⃣ Clean escaped quotes and retry
+      const cleaned = text.replace(/\\"/g, '"').replace(/\\n/g, "").trim();
+      try {
+        return JSON.parse(cleaned);
+      } catch (_) {
+        throw new Error("No valid JSON structure found.");
+      }
+    }
 
-  const curriculum = await res.json();
-  window._curriculum = curriculum;
+    // ----------------------------
+    // 🧩 PARSE GEMINI RESPONSE
+    // ----------------------------
+    let jsonText = "";
+    try {
+      const outer = JSON.parse(rawText);
+      jsonText =
+        outer?.candidates?.[0]?.content?.parts?.[0]?.text ||
+        outer?.output_text ||
+        rawText;
+    } catch {
+      jsonText = rawText;
+    }
 
-  subjectSelect.innerHTML = Object.keys(curriculum)
-    .map((s) => `<option>${s}</option>`)
-    .join("");
+    const parsed = extractJSON(jsonText);
+    const questions = Array.isArray(parsed?.questions) ? parsed.questions : [];
 
-  log("📘 Subjects loaded.");
-});
+    if (!questions.length) throw new Error("Failed to parse Gemini JSON output.");
 
-// Subject → Books
-subjectSelect.addEventListener("change", () => {
-  const subj = subjectSelect.value;
-  const books = Object.keys(window._curriculum[subj]);
-
-  bookSelect.innerHTML = books
-    .map((b) => `<option>${b}</option>`)
-    .join("");
-
-  log("📚 Books loaded.");
-});
-
-// Book → Chapters
-bookSelect.addEventListener("change", () => {
-  const subj = subjectSelect.value;
-  const book = bookSelect.value;
-
-  const chapters = window._curriculum[subj][book] || [];
-
-  chapterSelect.innerHTML = chapters
-    .map((c) => `<option>${c.chapter_title}</option>`)
-    .join("");
-
-  log("📖 Chapters loaded.");
-});
-
-// Generate + Upload
-generateBtn.addEventListener("click", async () => {
-  const cls = classSelect.value;
-  const subj = subjectSelect.value;
-  const book = bookSelect.value;
-  const chapter = chapterSelect.value;
-
-  log("⚙️ Generating question set via Gemini...");
-
-  const body = { className: cls, subject: subj, book, chapter };
-
-  // Gemini call
-  const genRes = await fetch(`${ENV.BACKEND_API}/api/gemini`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": ENV.GEMINI_API_KEY,
-    },
-    body: JSON.stringify(body),
-  });
-
-  const genData = await genRes.json();
-  log(`✅ Gemini generated ${genData.count} questions.`);
-
-  // Supabase insert
-  log("📤 Uploading to Supabase...");
-
-  const upRes = await fetch(`${ENV.BACKEND_API}/api/manageSupabase`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      className: cls,
-      tableName: genData.table,
-      rows: genData.rows,
-    }),
-  });
-
-  const upData = await upRes.json();
-  log(`✅ Supabase upload complete: ${upData.inserted} rows inserted`);
-
-  log("🎉 Full automation flow completed successfully.");
-});
+    return res.status(200).json({ ok: true, questions });
+  } catch (err) {
+    console.error("❌ /api/gemini.js error:", err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+}
