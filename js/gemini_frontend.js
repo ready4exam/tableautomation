@@ -1,4 +1,4 @@
-// gemini_frontend.js — FINAL CLEAN VERSION (No x-api-key, No dev-mode)
+// gemini_frontend.js — FINAL CLEAN VERSION with optimized tableName builder
 
 // Backend root
 const BACKEND_API = "https://ready4exam-master-automation.vercel.app";
@@ -24,18 +24,16 @@ async function loadCurriculum(cls) {
   const repoUrl = `https://ready4exam.github.io/ready4exam-${cls}/js/curriculum.js`;
   const backendUrl = `${BACKEND_API}/static_curriculum/class${cls}/curriculum.json`;
 
-  // First try repo file
   try {
     log(`📘 Trying curriculum from: ${repoUrl}`);
     const module = await import(repoUrl);
     const raw = module.curriculum ?? module.default ?? module;
     log("✅ Loaded curriculum from class repo.");
     return normalize(raw);
-  } catch (err) {
+  } catch {
     log("⚠️ Repo curriculum missing → fallback to backend JSON...");
   }
 
-  // Fallback
   const res = await fetch(backendUrl);
   if (!res.ok) throw new Error(`Backend curriculum missing for class ${cls}.`);
   log("✅ Loaded curriculum from backend static JSON.");
@@ -43,12 +41,11 @@ async function loadCurriculum(cls) {
 }
 
 // =======================================================
-// 2. Normalize Curriculum to Standard Shape
+// 2. NORMALIZE CURRICULUM
 // =======================================================
 function normalize(raw) {
   if (!raw) return {};
 
-  // Format A — Array structure (backend JSON for class11/12)
   if (Array.isArray(raw)) {
     const out = {};
     raw.forEach((s) => {
@@ -62,7 +59,6 @@ function normalize(raw) {
     return out;
   }
 
-  // Format B — Object structure (frontend repo)
   if (typeof raw === "object") {
     const out = {};
     Object.keys(raw).forEach((subj) => {
@@ -80,7 +76,7 @@ function normalize(raw) {
 }
 
 // =======================================================
-// 3. Populate UI
+// 3. POPULATE UI
 // =======================================================
 function populateSubjects() {
   subjectSelect.innerHTML =
@@ -96,14 +92,12 @@ function populateSubjects() {
 function populateBooks(subj) {
   const books = Object.keys(curriculum[subj] || {});
 
-  // Classes 11 & 12 → always show books
   if (Number(classSelect.value) >= 11 || books.length > 1) {
     bookContainer.classList.remove("hidden");
     bookSelect.innerHTML =
       `<option value="">-- Select Book --</option>` +
       books.map((b) => `<option>${b}</option>`).join("");
   } else {
-    // classes 5–10: directly chapters (implicit single book)
     bookContainer.classList.add("hidden");
     populateChapters(subj, books[0]);
   }
@@ -151,7 +145,17 @@ bookSelect.addEventListener("change", () => {
 });
 
 // =======================================================
-// 5. FINAL: GEMINI → SUPABASE WORKING AUTOMATION (NO x-api-key)
+// 5. OPTIMIZED TABLE NAME BUILDER
+// =======================================================
+function buildTableName(cls, subject, chapter) {
+  return `class${cls}_${subject}_${chapter}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")     // replace all non-alphanumeric
+    .replace(/^_+|_+$/g, "");        // trim start/end underscores
+}
+
+// =======================================================
+// 6. GEMINI → SUPABASE AUTOMATION (aligned with backend)
 // =======================================================
 generateBtn.addEventListener("click", async () => {
   const cls = classSelect.value;
@@ -159,39 +163,52 @@ generateBtn.addEventListener("click", async () => {
 
   const book =
     bookContainer.classList.contains("hidden")
-      ? Object.keys(curriculum[subj])[0] // class 5–10
+      ? Object.keys(curriculum[subj])[0]
       : bookSelect.value;
 
   const chapter = chapterSelect.value;
 
   log(`⚙️ Generating questions for ${chapter}...`);
 
-  // 1. Call Gemini (no x-api-key)
+  // 1️⃣ Call Gemini (backend expects meta)
   const genRes = await fetch(`${BACKEND_API}/api/gemini`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      className: `class${cls}`,
-      subject: subj,
-      book,
-      chapter
+      meta: {
+        class_name: `class${cls}`,
+        subject: subj,
+        book,
+        chapter,
+        num: 60
+      }
     })
   });
 
   const genData = await genRes.json();
-  log(`✅ Gemini generated ${genData.count} questions`);
-  log(`📄 Target Table: ${genData.table}`);
 
-  // 2. Upload to Supabase
-  log("📤 Uploading rows to Supabase...");
+  if (!genData.ok || !genData.questions) {
+    log("❌ Gemini error: " + genData.error);
+    return;
+  }
 
+  const rows = genData.questions;     
+  const count = rows.length;          
+
+  const tableName = buildTableName(cls, subj, chapter);
+
+  log(`✅ Gemini generated ${count} questions`);
+  log(`📄 Table Name: ${tableName}`);
+  log(`📤 Uploading to Supabase...`);
+
+  // 2️⃣ Upload to Supabase
   const upRes = await fetch(`${BACKEND_API}/api/manageSupabase`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       className: `class${cls}`,
-      tableName: genData.table,
-      rows: genData.rows
+      tableName,
+      rows
     })
   });
 
