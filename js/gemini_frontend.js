@@ -1,6 +1,8 @@
-// gemini_frontend.js — Phase-2 Working Version
+// gemini_frontend.js — Phase-2 Working Version (Fixed for ES Module Loading)
 
 import { ENV } from "./config.js";
+
+console.log("🚀 tableautomation: gemini_frontend.js loaded");
 
 // Render UI
 document.getElementById("app").innerHTML = `
@@ -37,6 +39,7 @@ document.getElementById("app").innerHTML = `
   </div>
 `;
 
+// Log helper
 const log = (m) => {
   document.getElementById("logBox").textContent += m + "\n";
 };
@@ -48,37 +51,55 @@ const bookSelect = document.getElementById("bookSelect");
 const chapterSelect = document.getElementById("chapterSelect");
 const generateBtn = document.getElementById("generateBtn");
 
-// Load curriculum
+// Load curriculum JSON
 classSelect.addEventListener("change", async () => {
-  log("📚 Loading subjects...");
   const cls = classSelect.value;
 
-  const res = await fetch(`${ENV.BACKEND_API}/static_curriculum/${cls}/curriculum.json`);
-  const curriculum = await res.json();
+  if (!cls) return;
 
+  log("📚 Loading subjects...");
+
+  const res = await fetch(
+    `${ENV.BACKEND_API}/static_curriculum/${cls}/curriculum.json`
+  );
+
+  const curriculum = await res.json();
   window._curriculum = curriculum;
 
   subjectSelect.innerHTML = Object.keys(curriculum)
     .map((s) => `<option>${s}</option>`)
     .join("");
+
+  log("📘 Subjects loaded.");
 });
 
 // Subject → Books
 subjectSelect.addEventListener("change", () => {
   const subj = subjectSelect.value;
   const books = Object.keys(window._curriculum[subj]);
-  bookSelect.innerHTML = books.map((b) => `<option>${b}</option>`).join("");
+
+  bookSelect.innerHTML = books
+    .map((b) => `<option>${b}</option>`)
+    .join("");
+
+  log("📚 Books loaded.");
 });
 
 // Book → Chapters
 bookSelect.addEventListener("change", () => {
   const subj = subjectSelect.value;
   const book = bookSelect.value;
-  const chapters = window._curriculum[subj][book];
-  chapterSelect.innerHTML = chapters.map((c) => `<option>${c.chapter_title}</option>`).join("");
+
+  const chapters = window._curriculum[subj][book] || [];
+
+  chapterSelect.innerHTML = chapters
+    .map((c) => `<option>${c.chapter_title}</option>`)
+    .join("");
+
+  log("📖 Chapters loaded.");
 });
 
-// GENERATE + UPLOAD
+// Generate + Upload
 generateBtn.addEventListener("click", async () => {
   const cls = classSelect.value;
   const subj = subjectSelect.value;
@@ -87,24 +108,24 @@ generateBtn.addEventListener("click", async () => {
 
   log("⚙️ Generating question set via Gemini...");
 
-  const body = {
-    className: cls,
-    subject: subj,
-    book,
-    chapter,
-  };
+  const body = { className: cls, subject: subj, book, chapter };
 
+  // Gemini call
   const genRes = await fetch(`${ENV.BACKEND_API}/api/gemini`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": ENV.GEMINI_API_KEY },
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": ENV.GEMINI_API_KEY,
+    },
     body: JSON.stringify(body),
   });
 
   const genData = await genRes.json();
   log(`✅ Gemini generated ${genData.count} questions.`);
 
-  // Upload to Supabase
+  // Supabase insert
   log("📤 Uploading to Supabase...");
+
   const upRes = await fetch(`${ENV.BACKEND_API}/api/manageSupabase`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
