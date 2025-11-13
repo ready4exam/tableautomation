@@ -1,14 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Ready4Exam – Developer Automation Tool</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
-
 <body class="bg-gray-50 font-sans min-h-screen">
-  <!-- Header -->
   <header class="bg-blue-700 text-white py-4 shadow-md">
     <div class="max-w-6xl mx-auto px-6 flex justify-between items-center">
       <h1 class="text-xl font-bold">Ready4Exam – Automation Console</h1>
@@ -16,16 +14,11 @@
     </div>
   </header>
 
-  <!-- Main -->
   <main class="max-w-4xl mx-auto p-6 space-y-6">
-
-    <!-- Curriculum Loader -->
     <section class="bg-white shadow-md rounded-xl p-6">
       <h2 class="text-2xl font-bold mb-4 text-blue-700">Curriculum Loader</h2>
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-
-        <!-- Class -->
         <div>
           <label class="block text-sm font-semibold mb-1">Select Class</label>
           <select id="classSelect" class="w-full border border-gray-300 rounded-lg p-2">
@@ -41,27 +34,22 @@
           </select>
         </div>
 
-        <!-- Subject -->
         <div>
           <label class="block text-sm font-semibold mb-1">Select Subject</label>
           <select id="subjectSelect" class="w-full border border-gray-300 rounded-lg p-2" disabled></select>
         </div>
 
-        <!-- Book -->
         <div id="bookContainer" class="hidden">
           <label class="block text-sm font-semibold mb-1">Select Book</label>
           <select id="bookSelect" class="w-full border border-gray-300 rounded-lg p-2"></select>
         </div>
-
       </div>
 
-      <!-- Chapter -->
       <div class="mt-4">
         <label class="block text-sm font-semibold mb-1">Select Chapter</label>
         <select id="chapterSelect" class="w-full border border-gray-300 rounded-lg p-2" disabled></select>
       </div>
 
-      <!-- Buttons -->
       <div class="flex gap-4 mt-6">
         <button id="generateBtn"
           class="bg-blue-700 text-white px-5 py-2 rounded-lg shadow disabled:opacity-50"
@@ -75,24 +63,20 @@
           🔄 Refresh Table
         </button>
       </div>
-
     </section>
 
-    <!-- Logs -->
     <section class="bg-white shadow-md rounded-xl p-6">
       <h2 class="text-xl font-bold mb-2 text-blue-700">Logs</h2>
       <textarea id="log" readonly
         class="w-full h-60 border border-gray-300 rounded-lg p-3 text-sm font-mono bg-gray-50"></textarea>
     </section>
-
   </main>
 
   <footer class="text-center text-xs text-gray-500 py-4">
     Ready4Exam Developer Tool © 2025 | For internal use only
   </footer>
 
-  <!-- IMPORTANT: Load JS as ES module -->
+  <!-- module script -->
   <script type="module" src="./js/gemini_frontend.js"></script>
-
 </body>
 </html>
