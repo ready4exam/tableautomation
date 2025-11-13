@@ -1,7 +1,9 @@
+// gemini_frontend.js – Corrected for Class 11/12 curriculum.js structure
+
 import { ENV } from "./config.js";
 
-const log = (m) => {
-  document.getElementById("log").value += m + "\n";
+const log = (msg) => {
+  document.getElementById("log").value += msg + "\n";
 };
 
 const classSelect = document.getElementById("classSelect");
@@ -10,51 +12,66 @@ const bookSelect = document.getElementById("bookSelect");
 const chapterSelect = document.getElementById("chapterSelect");
 const bookContainer = document.getElementById("bookContainer");
 
-const generateBtn = document.getElementById("generateBtn");
-const refreshBtn = document.getElementById("refreshBtn");
-
 let curriculum = null;
 
-// Load curriculum
+// Load curriculum.js from class repo
 classSelect.addEventListener("change", async () => {
   const cls = classSelect.value;
   if (!cls) return;
 
-  log(`📘 Loading curriculum for ${cls}...`);
+  log(`📘 Loading Class ${cls} curriculum...`);
 
-  const res = await fetch(`${ENV.BACKEND_API}/static_curriculum/${cls}/curriculum.json`);
-  curriculum = await res.json();
+  // Load frontend curriculum.js from class repo
+  const url = `https://ready4exam.github.io/ready4exam-${cls}/js/curriculum.js`;
 
-  subjectSelect.innerHTML = `<option value="">-- Select Subject --</option>` +
-    Object.keys(curriculum).map(s => `<option>${s}</option>`).join("");
+  const module = await import(url);
+  curriculum = module.curriculum;
+
+  // Populate SUBJECTS
+  subjectSelect.innerHTML =
+    `<option value="">-- Select Subject --</option>` +
+    Object.keys(curriculum)
+      .map((s) => `<option value="${s}">${s}</option>`)
+      .join("");
 
   subjectSelect.disabled = false;
+
+  log("📘 Subjects loaded.");
 });
 
 // Subject → Books
 subjectSelect.addEventListener("change", () => {
   const subj = subjectSelect.value;
-  const books = Object.keys(curriculum[subj]);
+  if (!subj) return;
+
+  const books = Object.keys(curriculum[subj]); // correct for your format
+
+  bookSelect.innerHTML =
+    `<option value="">-- Select Book --</option>` +
+    books.map((b) => `<option value="${b}">${b}</option>`).join("");
 
   bookContainer.classList.remove("hidden");
-  bookSelect.innerHTML = books.map(b => `<option>${b}</option>`).join("");
 
-  chapterSelect.disabled = true;
+  log("📗 Books loaded.");
 });
 
 // Book → Chapters
 bookSelect.addEventListener("change", () => {
   const subj = subjectSelect.value;
   const book = bookSelect.value;
+  if (!subj || !book) return;
 
-  const chapters = curriculum[subj][book];
+  const chapters = curriculum[subj][book]; // Array of objects
 
-  chapterSelect.innerHTML = chapters
-    .map((c) => `<option>${c.chapter_title}</option>`)
-    .join("");
+  chapterSelect.innerHTML =
+    `<option value="">-- Select Chapter --</option>` +
+    chapters
+      .map((c) => `<option value="${c.chapter_title}">${c.chapter_title}</option>`)
+      .join("");
 
   chapterSelect.disabled = false;
-  generateBtn.disabled = false;
+
+  log("📘 Chapters loaded.");
 });
 
 // Generate + Upload
@@ -68,15 +85,22 @@ generateBtn.addEventListener("click", async () => {
 
   const genRes = await fetch(`${ENV.BACKEND_API}/api/gemini`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": ENV.GEMINI_API_KEY },
-    body: JSON.stringify({ className: cls, subject: subj, book, chapter }),
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": ENV.GEMINI_API_KEY,
+    },
+    body: JSON.stringify({
+      className: cls,
+      subject: subj,
+      book,
+      chapter,
+    }),
   });
 
   const genData = await genRes.json();
   log(`✅ Gemini generated ${genData.count} questions.`);
 
   log("📤 Uploading to Supabase...");
-
   const upRes = await fetch(`${ENV.BACKEND_API}/api/manageSupabase`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
