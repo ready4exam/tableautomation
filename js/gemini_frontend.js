@@ -1,13 +1,15 @@
-// gemini_frontend.js — FINAL CLEAN VERSION with optimized tableName builder
+// ------------------------------
+//  gemini_frontend.js – FINAL VERSION
+//  Fully aligned with Phase-2 backend
+//  Sends:  { meta: {...}, csv: [...] }
+// ------------------------------
 
-// Backend root
 const BACKEND_API = "https://ready4exam-master-automation.vercel.app";
 
-// Helpers
 const $ = (id) => document.getElementById(id);
 const log = (m) => ($("log").value += m + "\n");
 
-// UI elements
+// UI refs
 const classSelect = $("classSelect");
 const subjectSelect = $("subjectSelect");
 const bookSelect = $("bookSelect");
@@ -17,9 +19,9 @@ const generateBtn = $("generateBtn");
 
 let curriculum = null;
 
-// =======================================================
+// ==========================================
 // 1. LOAD CURRICULUM (Repo → Backend Fallback)
-// =======================================================
+// ==========================================
 async function loadCurriculum(cls) {
   const repoUrl = `https://ready4exam.github.io/ready4exam-${cls}/js/curriculum.js`;
   const backendUrl = `${BACKEND_API}/static_curriculum/class${cls}/curriculum.json`;
@@ -30,19 +32,18 @@ async function loadCurriculum(cls) {
     const raw = module.curriculum ?? module.default ?? module;
     log("✅ Loaded curriculum from class repo.");
     return normalize(raw);
-  } catch {
-    log("⚠️ Repo curriculum missing → fallback to backend JSON...");
+  } catch (e) {
+    log("⚠️ Repo curriculum missing → trying backend...");
   }
 
   const res = await fetch(backendUrl);
-  if (!res.ok) throw new Error(`Backend curriculum missing for class ${cls}.`);
+  if (!res.ok) throw new Error(`Backend curriculum missing for class ${cls}`);
+
   log("✅ Loaded curriculum from backend static JSON.");
   return normalize(await res.json());
 }
 
-// =======================================================
-// 2. NORMALIZE CURRICULUM
-// =======================================================
+// Normalizer
 function normalize(raw) {
   if (!raw) return {};
 
@@ -75,23 +76,22 @@ function normalize(raw) {
   return {};
 }
 
-// =======================================================
-// 3. POPULATE UI
-// =======================================================
+// ==========================================
+// 2. POPULATE SUBJECTS, BOOKS, CHAPTERS
+// ==========================================
 function populateSubjects() {
   subjectSelect.innerHTML =
     `<option value="">-- Select Subject --</option>` +
     Object.keys(curriculum).map((s) => `<option>${s}</option>`).join("");
 
   subjectSelect.disabled = false;
-  bookContainer.classList.add("hidden");
   chapterSelect.disabled = true;
   generateBtn.disabled = true;
+  bookContainer.classList.add("hidden");
 }
 
 function populateBooks(subj) {
   const books = Object.keys(curriculum[subj] || {});
-
   if (Number(classSelect.value) >= 11 || books.length > 1) {
     bookContainer.classList.remove("hidden");
     bookSelect.innerHTML =
@@ -107,15 +107,17 @@ function populateChapters(subj, book) {
   const chapters = curriculum[subj][book];
   chapterSelect.innerHTML =
     `<option value="">-- Select Chapter --</option>` +
-    chapters.map((c) => `<option value="${c.chapter_title}">${c.chapter_title}</option>`).join("");
+    chapters
+      .map((c) => `<option value="${c.chapter_title}">${c.chapter_title}</option>`)
+      .join("");
 
   chapterSelect.disabled = false;
   generateBtn.disabled = false;
 }
 
-// =======================================================
-// 4. EVENT HANDLERS
-// =======================================================
+// ==========================================
+// 3. EVENT LISTENERS
+// ==========================================
 classSelect.addEventListener("change", async () => {
   const cls = classSelect.value;
   if (!cls) return;
@@ -128,14 +130,13 @@ classSelect.addEventListener("change", async () => {
     populateSubjects();
     log("📗 Subjects ready.");
   } catch (err) {
-    log(`❌ Failed: ${err.message}`);
+    log("❌ " + err.message);
   }
 });
 
 subjectSelect.addEventListener("change", () => {
   const subj = subjectSelect.value;
-  if (!subj) return;
-  populateBooks(subj);
+  if (subj) populateBooks(subj);
 });
 
 bookSelect.addEventListener("change", () => {
@@ -144,19 +145,9 @@ bookSelect.addEventListener("change", () => {
   if (subj && book) populateChapters(subj, book);
 });
 
-// =======================================================
-// 5. OPTIMIZED TABLE NAME BUILDER
-// =======================================================
-function buildTableName(cls, subject, chapter) {
-  return `class${cls}_${subject}_${chapter}`
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")     // replace all non-alphanumeric
-    .replace(/^_+|_+$/g, "");        // trim start/end underscores
-}
-
-// =======================================================
-// 6. GEMINI → SUPABASE AUTOMATION (aligned with backend)
-// =======================================================
+// ==========================================
+// 4. GEMINI → SUPABASE AUTOMATION
+// ==========================================
 generateBtn.addEventListener("click", async () => {
   const cls = classSelect.value;
   const subj = subjectSelect.value;
@@ -170,7 +161,7 @@ generateBtn.addEventListener("click", async () => {
 
   log(`⚙️ Generating questions for ${chapter}...`);
 
-  // 1️⃣ Call Gemini (backend expects meta)
+  // 1️⃣ Call GEMINI backend
   const genRes = await fetch(`${BACKEND_API}/api/gemini`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -192,27 +183,34 @@ generateBtn.addEventListener("click", async () => {
     return;
   }
 
-  const rows = genData.questions;     
-  const count = rows.length;          
+  const rows = genData.questions;
+  log(`✅ Gemini generated ${rows.length} questions`);
 
-  const tableName = buildTableName(cls, subj, chapter);
+  // 2️⃣ Upload to Supabase – FINAL, CORRECT PAYLOAD
+  log("📤 Uploading to Supabase...");
 
-  log(`✅ Gemini generated ${count} questions`);
-  log(`📄 Table Name: ${tableName}`);
-  log(`📤 Uploading to Supabase...`);
-
-  // 2️⃣ Upload to Supabase
   const upRes = await fetch(`${BACKEND_API}/api/manageSupabase`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      className: `class${cls}`,
-      tableName,
-      rows
+      meta: {
+        class_name: `class${cls}`,
+        subject: subj,
+        book,
+        chapter,
+        refresh: false
+      },
+      csv: rows
     })
   });
 
   const upData = await upRes.json();
-  log(`✅ Supabase inserted: ${upData.inserted} rows`);
+
+  if (!upData.ok) {
+    log("❌ Supabase Error: " + upData.error);
+    return;
+  }
+
+  log(`✅ Supabase inserted ${rows.length} rows`);
   log("🎉 Automation flow completed successfully.");
 });
