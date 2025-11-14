@@ -1,216 +1,203 @@
-// ------------------------------
-//  gemini_frontend.js – FINAL VERSION
-//  Fully aligned with Phase-2 backend
-//  Sends:  { meta: {...}, csv: [...] }
-// ------------------------------
+// gemini_frontend.js
+// -------------------------------------------------------
+// Phase-3 Stable Automation Tool (Class 5–12)
+// -------------------------------------------------------
 
-const BACKEND_API = "https://ready4exam-master-automation.vercel.app";
+// -------------------------------------------------------
+// CONFIG
+// -------------------------------------------------------
+const BACKEND = "https://ready4exam-master-automation.vercel.app";
 
-const $ = (id) => document.getElementById(id);
-const log = (m) => ($("log").value += m + "\n");
+//--------------------------------------------------------
+// LOGGING
+//--------------------------------------------------------
+function log(msg) {
+  const box = document.getElementById("log");
+  box.value += msg + "\n";
+  box.scrollTop = box.scrollHeight;
+}
 
-// UI refs
-const classSelect = $("classSelect");
-const subjectSelect = $("subjectSelect");
-const bookSelect = $("bookSelect");
-const chapterSelect = $("chapterSelect");
-const bookContainer = $("bookContainer");
-const generateBtn = $("generateBtn");
+// -------------------------------------------------------
+// CURRICULUM LOADER
+// -------------------------------------------------------
+function getCurriculumURL(className) {
+  const num = className.replace("class", ""); 
+  return `https://ready4exam.github.io/ready4exam-${num}/js/curriculum.js`;
+}
 
-let curriculum = null;
-
-// ==========================================
-// 1. LOAD CURRICULUM (Repo → Backend Fallback)
-// ==========================================
-async function loadCurriculum(cls) {
-  const repoUrl = `https://ready4exam.github.io/ready4exam-${cls}/js/curriculum.js`;
-  const backendUrl = `${BACKEND_API}/static_curriculum/class${cls}/curriculum.json`;
+async function loadCurriculum(className) {
+  log(`=== Loading Class ${className} Curriculum ===`);
 
   try {
-    log(`📘 Trying curriculum from: ${repoUrl}`);
-    const module = await import(repoUrl);
-    const raw = module.curriculum ?? module.default ?? module;
-    log("✅ Loaded curriculum from class repo.");
-    return normalize(raw);
-  } catch (e) {
-    log("⚠️ Repo curriculum missing → trying backend...");
-  }
+    const url = getCurriculumURL(className);
+    log(`📘 Loading from: ${url}`);
 
-  const res = await fetch(backendUrl);
-  if (!res.ok) throw new Error(`Backend curriculum missing for class ${cls}`);
+    const module = await import(url + "?v=" + Date.now());
+    const curriculum = module.curriculum;
 
-  log("✅ Loaded curriculum from backend static JSON.");
-  return normalize(await res.json());
-}
+    log("✅ Curriculum loaded.");
 
-// Normalizer
-function normalize(raw) {
-  if (!raw) return {};
-
-  if (Array.isArray(raw)) {
-    const out = {};
-    raw.forEach((s) => {
-      out[s.subject] = {};
-      s.books.forEach((b) => {
-        out[s.subject][b.bookName] = b.chapters.map((c) =>
-          typeof c === "string" ? { chapter_title: c } : c
-        );
-      });
-    });
-    return out;
-  }
-
-  if (typeof raw === "object") {
-    const out = {};
-    Object.keys(raw).forEach((subj) => {
-      out[subj] = {};
-      Object.keys(raw[subj]).forEach((book) => {
-        out[subj][book] = raw[subj][book].map((c) =>
-          typeof c === "string" ? { chapter_title: c } : c
-        );
-      });
-    });
-    return out;
-  }
-
-  return {};
-}
-
-// ==========================================
-// 2. POPULATE SUBJECTS, BOOKS, CHAPTERS
-// ==========================================
-function populateSubjects() {
-  subjectSelect.innerHTML =
-    `<option value="">-- Select Subject --</option>` +
-    Object.keys(curriculum).map((s) => `<option>${s}</option>`).join("");
-
-  subjectSelect.disabled = false;
-  chapterSelect.disabled = true;
-  generateBtn.disabled = true;
-  bookContainer.classList.add("hidden");
-}
-
-function populateBooks(subj) {
-  const books = Object.keys(curriculum[subj] || {});
-  if (Number(classSelect.value) >= 11 || books.length > 1) {
-    bookContainer.classList.remove("hidden");
-    bookSelect.innerHTML =
-      `<option value="">-- Select Book --</option>` +
-      books.map((b) => `<option>${b}</option>`).join("");
-  } else {
-    bookContainer.classList.add("hidden");
-    populateChapters(subj, books[0]);
+    return curriculum;
+  } catch (err) {
+    console.error(err);
+    log("❌ Failed loading curriculum.js");
+    throw err;
   }
 }
 
-function populateChapters(subj, book) {
-  const chapters = curriculum[subj][book];
-  chapterSelect.innerHTML =
-    `<option value="">-- Select Chapter --</option>` +
-    chapters
-      .map((c) => `<option value="${c.chapter_title}">${c.chapter_title}</option>`)
-      .join("");
+// -------------------------------------------------------
+// TABLE NAME BUILDER
+// -------------------------------------------------------
+function buildTableName(chapterTitle) {
+  const slug = chapterTitle
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .trim()
+    .split(/\s+/);
 
-  chapterSelect.disabled = false;
-  generateBtn.disabled = false;
+  if (slug.length === 1) return `${slug[0]}_quiz`;
+
+  const first = slug[0];
+  const last = slug[slug.length - 1];
+
+  return `${first}_${last}_quiz`;
 }
 
-// ==========================================
-// 3. EVENT LISTENERS
-// ==========================================
-classSelect.addEventListener("change", async () => {
+// -------------------------------------------------------
+// UI ELEMENTS
+// -------------------------------------------------------
+const classSelect = document.getElementById("classSelect");
+const subjectSelect = document.getElementById("subjectSelect");
+const bookSelect = document.getElementById("bookSelect");
+const chapterSelect = document.getElementById("chapterSelect");
+const generateBtn = document.getElementById("generateBtn");
+const refreshBtn = document.getElementById("refreshBtn");
+
+let CURR = null;
+
+// -------------------------------------------------------
+// CLASS → SUBJECTS
+// -------------------------------------------------------
+classSelect.onchange = async () => {
   const cls = classSelect.value;
   if (!cls) return;
 
-  $("log").value = "";
-  log(`=== Loading Class ${cls} Curriculum ===`);
+  CURR = await loadCurriculum(cls);
 
-  try {
-    curriculum = await loadCurriculum(cls);
-    populateSubjects();
-    log("📗 Subjects ready.");
-  } catch (err) {
-    log("❌ " + err.message);
+  subjectSelect.innerHTML =
+    `<option value="">-- Select Subject --</option>` +
+    Object.keys(CURR)
+      .map((s) => `<option value="${s}">${s}</option>`)
+      .join("");
+
+  subjectSelect.disabled = false;
+  bookSelect.innerHTML = "";
+  chapterSelect.innerHTML = "";
+};
+
+// -------------------------------------------------------
+// SUBJECT → BOOKS
+// -------------------------------------------------------
+subjectSelect.onchange = () => {
+  const subj = subjectSelect.value;
+  if (!subj) return;
+
+  const books = Object.keys(CURR[subj]);
+
+  if (books.length === 1) {
+    bookSelect.innerHTML = `<option>${books[0]}</option>`;
+    document.getElementById("bookContainer").classList.add("hidden");
+    loadChapters(subj, books[0]);
+  } else {
+    document.getElementById("bookContainer").classList.remove("hidden");
+
+    bookSelect.innerHTML =
+      `<option>-- Select Book --</option>` +
+      books.map((b) => `<option>${b}</option>`).join("");
   }
-});
+};
 
-subjectSelect.addEventListener("change", () => {
-  const subj = subjectSelect.value;
-  if (subj) populateBooks(subj);
-});
+// -------------------------------------------------------
+// BOOK → CHAPTERS
+// -------------------------------------------------------
+bookSelect.onchange = () => {
+  loadChapters(subjectSelect.value, bookSelect.value);
+};
 
-bookSelect.addEventListener("change", () => {
-  const subj = subjectSelect.value;
-  const book = bookSelect.value;
-  if (subj && book) populateChapters(subj, book);
-});
+function loadChapters(subj, book) {
+  const chapters = CURR[subj][book];
 
-// ==========================================
-// 4. GEMINI → SUPABASE AUTOMATION
-// ==========================================
-generateBtn.addEventListener("click", async () => {
+  chapterSelect.innerHTML =
+    `<option value="">-- Select Chapter --</option>` +
+    chapters
+      .map((c) => `<option>${c.chapter_title}</option>`)
+      .join("");
+
+  chapterSelect.disabled = false;
+
+  generateBtn.disabled = false;
+  refreshBtn.disabled = false;
+}
+
+// -------------------------------------------------------
+// GENERATE & UPLOAD
+// -------------------------------------------------------
+generateBtn.onclick = async () => {
   const cls = classSelect.value;
   const subj = subjectSelect.value;
-
-  const book =
-    bookContainer.classList.contains("hidden")
-      ? Object.keys(curriculum[subj])[0]
-      : bookSelect.value;
-
+  const book = bookSelect.value;
   const chapter = chapterSelect.value;
 
   log(`⚙️ Generating questions for ${chapter}...`);
 
-  // 1️⃣ Call GEMINI backend
-  const genRes = await fetch(`${BACKEND_API}/api/gemini`, {
+  const meta = {
+    class_name: cls,
+    subject: subj,
+    book,
+    chapter
+  };
+
+  // 1️⃣ CALL GEMINI
+  const genRes = await fetch(`${BACKEND}/api/gemini`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      meta: {
-        class_name: `class${cls}`,
-        subject: subj,
-        book,
-        chapter,
-        num: 60
-      }
-    })
+    body: JSON.stringify({ meta })
   });
 
-  const genData = await genRes.json();
+  const gen = await genRes.json();
 
-  if (!genData.ok || !genData.questions) {
-    log("❌ Gemini error: " + genData.error);
+  if (!gen.ok) {
+    log("❌ Gemini error: " + gen.error);
     return;
   }
 
-  const rows = genData.questions;
-  log(`✅ Gemini generated ${rows.length} questions`);
+  log(`✅ Gemini created ${gen.questions.length} questions`);
 
-  // 2️⃣ Upload to Supabase – FINAL, CORRECT PAYLOAD
+  const table = buildTableName(chapter);
+
+  // 2️⃣ UPLOAD TO SUPABASE
   log("📤 Uploading to Supabase...");
 
-  const upRes = await fetch(`${BACKEND_API}/api/manageSupabase`, {
+  const upRes = await fetch(`${BACKEND}/api/manageSupabase`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      meta: {
-        class_name: `class${cls}`,
-        subject: subj,
-        book,
-        chapter,
-        refresh: false
-      },
-      csv: rows
+      meta,
+      csv: gen.questions
     })
   });
 
-  const upData = await upRes.json();
+  const up = await upRes.json();
 
-  if (!upData.ok) {
-    log("❌ Supabase Error: " + upData.error);
+  if (!up.ok) {
+    log("❌ Upload failed: " + up.error);
     return;
   }
 
-  log(`✅ Supabase inserted ${rows.length} rows`);
-  log("🎉 Automation flow completed successfully.");
-});
+  log(`✅ Uploaded ${gen.questions.length} rows to ${table}`);
+
+  log("🎉 Automation completed successfully!");
+
+  // 3️⃣ START QUIZ
+  location.href = `quiz-engine.html?table=${table}&difficulty=medium`;
+};
