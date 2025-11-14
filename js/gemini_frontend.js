@@ -21,7 +21,7 @@ function log(msg) {
 // CURRICULUM LOADER
 // -------------------------------------------------------
 function getCurriculumURL(className) {
-  const num = className.replace("class", ""); 
+  const num = className.replace("class", "");
   return `https://ready4exam.github.io/ready4exam-${num}/js/curriculum.js`;
 }
 
@@ -36,31 +36,12 @@ async function loadCurriculum(className) {
     const curriculum = module.curriculum;
 
     log("✅ Curriculum loaded.");
-
     return curriculum;
   } catch (err) {
     console.error(err);
     log("❌ Failed loading curriculum.js");
     throw err;
   }
-}
-
-// -------------------------------------------------------
-// TABLE NAME BUILDER
-// -------------------------------------------------------
-function buildTableName(chapterTitle) {
-  const slug = chapterTitle
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, "")
-    .trim()
-    .split(/\s+/);
-
-  if (slug.length === 1) return `${slug[0]}_quiz`;
-
-  const first = slug[0];
-  const last = slug[slug.length - 1];
-
-  return `${first}_${last}_quiz`;
 }
 
 // -------------------------------------------------------
@@ -129,9 +110,7 @@ function loadChapters(subj, book) {
 
   chapterSelect.innerHTML =
     `<option value="">-- Select Chapter --</option>` +
-    chapters
-      .map((c) => `<option>${c.chapter_title}</option>`)
-      .join("");
+    chapters.map((c) => `<option>${c.chapter_title}</option>`).join("");
 
   chapterSelect.disabled = false;
 
@@ -154,14 +133,14 @@ generateBtn.onclick = async () => {
     class_name: cls,
     subject: subj,
     book,
-    chapter
+    chapter,
   };
 
   // 1️⃣ CALL GEMINI
   const genRes = await fetch(`${BACKEND}/api/gemini`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ meta })
+    body: JSON.stringify({ meta }),
   });
 
   const gen = await genRes.json();
@@ -173,8 +152,6 @@ generateBtn.onclick = async () => {
 
   log(`✅ Gemini created ${gen.questions.length} questions`);
 
-  const table = buildTableName(chapter);
-
   // 2️⃣ UPLOAD TO SUPABASE
   log("📤 Uploading to Supabase...");
 
@@ -183,8 +160,8 @@ generateBtn.onclick = async () => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       meta,
-      csv: gen.questions
-    })
+      csv: gen.questions,
+    }),
   });
 
   const up = await upRes.json();
@@ -194,10 +171,9 @@ generateBtn.onclick = async () => {
     return;
   }
 
-  log(`✅ Uploaded ${gen.questions.length} rows to ${table}`);
-
+  log(`✅ Uploaded ${gen.questions.length} rows to ${up.table}`);
   log("🎉 Automation completed successfully!");
 
-  // 3️⃣ START QUIZ
-  location.href = `quiz-engine.html?table=${table}&difficulty=medium`;
+  // 3️⃣ START QUIZ (use returned table from backend)
+  location.href = `quiz-engine.html?table=${up.table}&difficulty=medium`;
 };
