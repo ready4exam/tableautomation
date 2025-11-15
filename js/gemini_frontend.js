@@ -1,6 +1,11 @@
 // js/gemini_frontend.js
-// Frontend automation script (browser). AUTO_UPDATE = YES (it will call updateCurriculum automatically)
+// TableAutomation frontend (Mode A — full UI + automation)
+// - Populates Class -> Subject -> Book -> Chapter dropdowns
+// - Calls /api/gemini, /api/manageSupabase, /api/updateCurriculum
+// - AUTO_UPDATE = YES (automatically updates class repo curriculum.js)
+// - Exports runAutomation(options) for programmatic use
 
+// ------------------- Helpers -------------------
 async function loadCurriculumForClass(classNum) {
   const url = `https://ready4exam.github.io/ready4exam-${classNum}/js/curriculum.js`;
   const module = await import(url).catch((e) => {
@@ -12,11 +17,25 @@ async function loadCurriculumForClass(classNum) {
   return curriculum;
 }
 
-// UI helper (not prescriptive — adapt to your UI)
-function showStatus(msg) {
-  console.log("[TableAutomation]", msg);
-  const el = document.getElementById("automation-status");
-  if (el) el.innerText = msg;
+function el(id) {
+  return document.getElementById(id);
+}
+
+function appendLog(text) {
+  const textarea = el("log");
+  const ts = new Date().toISOString();
+  if (textarea) {
+    textarea.value = `${ts}  ${text}\n` + textarea.value;
+  } else {
+    console.log("[TableAutomation][LOG]", text);
+  }
+}
+
+function showStatus(text) {
+  appendLog(text);
+  // optional visual status element
+  const statusEl = el("automation-status");
+  if (statusEl) statusEl.innerText = text;
 }
 
 async function postJSON(path, body) {
@@ -25,102 +44,405 @@ async function postJSON(path, body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  const data = await res.json();
+  const data = await res.json().catch(() => ({ ok: false, error: "Invalid JSON response" }));
   if (!res.ok) throw new Error(data.error || data.message || JSON.stringify(data));
   return data;
 }
 
-export async function runAutomation(options) {
-  // options: { class: "9", subject: "Science", book: "Science Textbook", chapter: "Force and Laws of Motion", difficulty: "Medium" }
+// ------------------- UI population -------------------
+function clearSelect(sel) {
+  sel.innerHTML = "";
+}
+
+function setDisabled(sel, disabled = true) {
+  sel.disabled = disabled;
+  if (disabled) sel.classList.add("opacity-50");
+  else sel.classList.remove("opacity-50");
+}
+
+function fillSelectWithArray(sel, arr, placeholder = "-- Select --") {
+  clearSelect(sel);
+  const empty = document.createElement("option");
+  empty.value = "";
+  empty.text = placeholder;
+  sel.appendChild(empty);
+  for (const item of arr) {
+    const o = document.createElement("option");
+    o.value = item;
+    o.text = item;
+    sel.appendChild(o);
+  }
+}
+
+// Given curriculum object, return sorted subject keys
+function getSubjectKeys(curriculum) {
+  return Object.keys(curriculum || {}).sort();
+}
+
+function getBookKeysForSubject(curriculum, subjectKey) {
+  if (!curriculum || !subjectKey) return [];
+  const booksObj = curriculum[subjectKey] || {};
+  return Object.keys(booksObj || {}).sort();
+}
+
+function getChaptersForBook(curriculum, subjectKey, bookKey) {
+  if (!curriculum || !subjectKey || !bookKey) return [];
+  const chapters = curriculum[subjectKey][bookKey] || [];
+  return Array.isArray(chapters) ? chapters : [];
+}
+
+// ------------------- DOM-binding functions -------------------
+async function onClassChange() {
   try {
-    showStatus("Loading curriculum...");
-    const curriculum = await loadCurriculumForClass(options.class);
+    const classSel = el("classSelect");
+    const subjectSel = el("subjectSelect");
+    const bookSel = el("bookSelect");
+    const bookContainer = el("bookContainer");
+    const chapterSel = el("chapterSelect");
+    const generateBtn = el("generateBtn");
+    const refreshBtn = el("refreshBtn");
 
-    // locate subject / book / chapter to get existing table_id (optional)
-    const subjectKey = Object.keys(curriculum).find(k => k.toLowerCase().includes((options.subject || "").toLowerCase()));
+    const classNum = classSel.value;
+    // reset subsequent controls
+    clearSelect(subjectSel);
+    clearSelect(bookSel);
+    clearSelect(chapterSel);
+    setDisabled(subjectSel, true);
+    setDisabled(bookSel, true);
+    setDisabled(chapterSel, true);
+    generateBtn.disabled = true;
+    refreshBtn.disabled = true;
+    bookContainer.classList.add("hidden");
+
+    if (!classNum) {
+      showStatus("Select a class.");
+      return;
+    }
+
+    showStatus(`Loading curriculum for class ${classNum}...`);
+    const curriculum = await loadCurriculumForClass(classNum);
+
+    const subjects = getSubjectKeys(curriculum);
+    if (!subjects.length) {
+      showStatus(`No subjects found in curriculum for class ${classNum}.`);
+      return;
+    }
+
+    // populate subjects
+    fillSelectWithArray(subjectSel, subjects, "-- Select Subject --");
+    setDisabled(subjectSel, false);
+    showStatus(`Loaded ${subjects.length} subjects for class ${classNum}.`);
+
+    // store curriculum in element for later use
+    subjectSel.dataset.curriculum = JSON.stringify(curriculum);
+  } catch (err) {
+    console.error("onClassChange error:", err);
+    showStatus("Error loading curriculum: " + (err.message || err));
+    alert("Error loading curriculum: " + (err.message || err));
+  }
+}
+
+function onSubjectChange() {
+  try {
+    const subjectSel = el("subjectSelect");
+    const bookSel = el("bookSelect");
+    const bookContainer = el("bookContainer");
+    const chapterSel = el("chapterSelect");
+    const generateBtn = el("generateBtn");
+    const refreshBtn = el("refreshBtn");
+
+    // reset lower controls
+    clearSelect(bookSel);
+    clearSelect(chapterSel);
+    setDisabled(bookSel, true);
+    setDisabled(chapterSel, true);
+    generateBtn.disabled = true;
+    refreshBtn.disabled = true;
+    bookContainer.classList.add("hidden");
+
+    const subjectKey = subjectSel.value;
     if (!subjectKey) {
-      throw new Error(`Subject "${options.subject}" not found in curriculum for class ${options.class}`);
-    }
-    const books = curriculum[subjectKey];
-    // if book provided, prefer it; otherwise take first book
-    const bookKey = options.book ? Object.keys(books).find(b => b.toLowerCase().includes((options.book || "").toLowerCase())) : Object.keys(books)[0];
-    const chapters = books[bookKey];
-    const chapterObj = chapters.find(ch => ch.chapter_title.trim().toLowerCase() === options.chapter.trim().toLowerCase());
-    if (!chapterObj) {
-      throw new Error(`Chapter "${options.chapter}" not found under ${subjectKey} / ${bookKey}`);
+      return;
     }
 
-    const existingTableId = chapterObj.table_id || null;
+    const curriculum = JSON.parse(subjectSel.dataset.curriculum || subjectSel.parentElement.dataset.curriculum || "{}");
+    const books = getBookKeysForSubject(curriculum, subjectKey);
 
+    if (!books.length) {
+      // If no multiple books, but chapters array might be directly under subject as a single book
+      // However our curriculum shape is subject -> book -> chapters, so handle gracefully
+      showStatus(`No book entries found for subject "${subjectKey}".`);
+      return;
+    }
+
+    // If only one book, show book selector but preselect first
+    fillSelectWithArray(bookSel, books, "-- Select Book --");
+    setDisabled(bookSel, false);
+    if (books.length === 1) {
+      bookSel.selectedIndex = 1; // pick the only book
+      bookContainer.classList.remove("hidden");
+      // trigger book change manually
+      onBookChange();
+    } else {
+      bookContainer.classList.remove("hidden");
+    }
+
+    showStatus(`Loaded ${books.length} books for subject ${subjectKey}.`);
+    // carry curriculum data to bookSel for convenience
+    bookSel.dataset.curriculum = subjectSel.dataset.curriculum;
+  } catch (err) {
+    console.error("onSubjectChange error:", err);
+    showStatus("Error while selecting subject: " + (err.message || err));
+  }
+}
+
+function onBookChange() {
+  try {
+    const classSel = el("classSelect");
+    const subjectSel = el("subjectSelect");
+    const bookSel = el("bookSelect");
+    const chapterSel = el("chapterSelect");
+    const generateBtn = el("generateBtn");
+    const refreshBtn = el("refreshBtn");
+
+    clearSelect(chapterSel);
+    setDisabled(chapterSel, true);
+    generateBtn.disabled = true;
+    refreshBtn.disabled = true;
+
+    const subjectKey = subjectSel.value;
+    const bookKey = bookSel.value;
+    if (!subjectKey || !bookKey) return;
+
+    const curriculum = JSON.parse(bookSel.dataset.curriculum || "{}");
+    const chapters = getChaptersForBook(curriculum, subjectKey, bookKey);
+    if (!chapters.length) {
+      showStatus(`No chapters found for ${subjectKey} / ${bookKey}`);
+      return;
+    }
+
+    // prepare options: display chapter_title and keep index or table_id as value (we'll use chapter_title for matching)
+    clearSelect(chapterSel);
+    const empty = document.createElement("option");
+    empty.value = "";
+    empty.text = "-- Select Chapter --";
+    chapterSel.appendChild(empty);
+
+    for (const ch of chapters) {
+      const o = document.createElement("option");
+      o.value = ch.chapter_title;
+      o.text = ch.chapter_title + (ch.table_id ? ` (${ch.table_id})` : "");
+      chapterSel.appendChild(o);
+    }
+
+    setDisabled(chapterSel, false);
+    showStatus(`Loaded ${chapters.length} chapters for ${bookKey}.`);
+  } catch (err) {
+    console.error("onBookChange error:", err);
+    showStatus("Error loading chapters: " + (err.message || err));
+  }
+}
+
+function onChapterChange() {
+  const chapterSel = el("chapterSelect");
+  const generateBtn = el("generateBtn");
+  const refreshBtn = el("refreshBtn");
+
+  const has = chapterSel.value && chapterSel.value.trim().length > 0;
+  generateBtn.disabled = !has;
+  refreshBtn.disabled = !has;
+}
+
+// ------------------- Automation (core) -------------------
+export async function runAutomation(options) {
+  // options may be provided or read from DOM
+  try {
+    // read DOM values if options not fully provided
+    const classVal = options?.class || el("classSelect").value;
+    const subjectVal = options?.subject || el("subjectSelect").value;
+    const bookVal = options?.book || el("bookSelect").value;
+    const chapterVal = options?.chapter || el("chapterSelect").value;
+    const difficultyVal = options?.difficulty || "Medium";
+
+    if (!classVal || !subjectVal || !chapterVal) {
+      throw new Error("Please select class, subject and chapter before generating.");
+    }
+
+    showStatus(`Starting automation: Class ${classVal} / ${subjectVal} / ${bookVal} / ${chapterVal}`);
+
+    // Step 1: generate via Gemini
     showStatus("Requesting Gemini to generate questions...");
-    const geminiRes = await postJSON("/api/gemini", { meta: { class_name: options.class, subject: subjectKey, book: bookKey, chapter: options.chapter } });
-    if (!geminiRes.ok) throw new Error(geminiRes.error || "Gemini failed");
+    const geminiRes = await postJSON("/api/gemini", { meta: { class_name: classVal, subject: subjectVal, book: bookVal, chapter: chapterVal } });
+    if (!geminiRes.ok) throw new Error(geminiRes.error || "Gemini failed.");
     const questions = geminiRes.questions;
+    showStatus(`Gemini produced ${questions.length} questions.`);
 
-    showStatus(`Generated ${questions.length} questions. Uploading to Supabase...`);
-    // Provide meta.table_id if we want to prefer existing curriculum table id
+    // Step 2: call manageSupabase to create table and insert
+    // Try to read existing table_id from curriculum for preference
+    let existingTableId = null;
+    try {
+      const curr = await loadCurriculumForClass(classVal);
+      // locate chapter in curriculum and get table_id if exists
+      const subjKeys = Object.keys(curr);
+      let found = false;
+      for (const sk of subjKeys) {
+        if (sk.toLowerCase().includes(subjectVal.toLowerCase())) {
+          const books = curr[sk];
+          const bk = bookVal || Object.keys(books)[0];
+          const chapters = books[bk] || [];
+          for (const ch of chapters) {
+            if (ch.chapter_title.trim().toLowerCase() === chapterVal.trim().toLowerCase()) {
+              existingTableId = ch.table_id || null;
+              found = true;
+              break;
+            }
+          }
+        }
+        if (found) break;
+      }
+    } catch (e) {
+      console.warn("Could not determine existing table_id:", e);
+    }
+
+    showStatus("Uploading questions to Supabase...");
     const manageBody = {
-      meta: { class_name: options.class, subject: subjectKey, book: bookKey, chapter: options.chapter, table_id: existingTableId },
+      meta: { class_name: classVal, subject: subjectVal, book: bookVal, chapter: chapterVal, table_id: existingTableId },
       csv: questions
     };
 
     const manageRes = await postJSON("/api/manageSupabase", manageBody);
     if (!manageRes.ok) throw new Error(manageRes.error || "manageSupabase failed");
-
     const newTableId = manageRes.new_table_id || manageRes.table;
+    showStatus(`Supabase: table updated -> ${newTableId}`);
 
-    showStatus(`Table updated: ${newTableId}. Updating curriculum in class repo...`);
-
-    // AUTO_UPDATE: call updateCurriculum
+    // Step 3: auto-update curriculum
     try {
-      const updateBody = {
-        class_name: options.class,
-        subject: subjectKey,
-        chapter: options.chapter,
-        new_table_id: newTableId
-      };
+      showStatus("Updating curriculum in class repo...");
+      const updateBody = { class_name: classVal, subject: subjectVal, chapter: chapterVal, new_table_id: newTableId };
       const updateRes = await postJSON("/api/updateCurriculum", updateBody);
       if (!updateRes.ok) {
         console.warn("updateCurriculum returned not ok:", updateRes);
-        showStatus(`Warning: curriculum update returned error. Proceeding to quiz.`);
+        showStatus("Warning: updateCurriculum returned not-ok. Proceeding to quiz.");
       } else {
-        showStatus(`Curriculum updated in repo ${updateRes.repo}.`);
+        showStatus(`Curriculum updated in ${updateRes.repo}`);
       }
     } catch (err) {
-      console.warn("Failed to update curriculum automatically:", err);
+      console.warn("Auto-update failed:", err);
       showStatus("Warning: failed to auto-update curriculum. Proceeding to quiz.");
     }
 
-    // Redirect to quiz engine
-    const difficulty = options.difficulty || "Medium";
-    const redirectUrl = `./quiz-engine.html?table=${encodeURIComponent(newTableId)}&difficulty=${encodeURIComponent(difficulty)}`;
+    // Step 4: Redirect to quiz-engine
     showStatus("Redirecting to quiz engine...");
+    const redirectUrl = `./quiz-engine.html?table=${encodeURIComponent(newTableId)}&difficulty=${encodeURIComponent(difficultyVal)}`;
     window.location.href = redirectUrl;
 
   } catch (err) {
-    console.error("Automation failed:", err);
+    console.error("runAutomation error:", err);
     showStatus("Automation failed: " + (err.message || err));
     alert("Automation failed: " + (err.message || err));
+    throw err;
   }
 }
 
-// Example: Hook to a button (assumes page has UI for inputs)
-document.addEventListener("DOMContentLoaded", function() {
-  const runBtn = document.getElementById("run-automation");
-  if (!runBtn) return;
-  runBtn.addEventListener("click", async () => {
-    const classInput = document.getElementById("input-class").value;
-    const subjectInput = document.getElementById("input-subject").value;
-    const bookInput = document.getElementById("input-book").value;
-    const chapterInput = document.getElementById("input-chapter").value;
-    const difficultyInput = document.getElementById("input-difficulty").value || "Medium";
+// ------------------- Refresh (re-run manageSupabase) -------------------
+async function onRefreshClick() {
+  try {
+    const classVal = el("classSelect").value;
+    const subjectVal = el("subjectSelect").value;
+    const bookVal = el("bookSelect").value;
+    const chapterVal = el("chapterSelect").value;
+    if (!classVal || !subjectVal || !chapterVal) {
+      alert("Select class, subject, chapter first.");
+      return;
+    }
 
-    await runAutomation({
-      class: classInput,
-      subject: subjectInput,
-      book: bookInput,
-      chapter: chapterInput,
-      difficulty: difficultyInput
-    });
+    showStatus("Refreshing table (re-run manageSupabase)...");
+    // Try to fetch existing curriculum table id
+    let existingTableId = null;
+    try {
+      const curr = await loadCurriculumForClass(classVal);
+      const subjKeys = Object.keys(curr);
+      for (const sk of subjKeys) {
+        if (sk.toLowerCase().includes(subjectVal.toLowerCase())) {
+          const books = curr[sk];
+          const bk = bookVal || Object.keys(books)[0];
+          const chapters = books[bk] || [];
+          for (const ch of chapters) {
+            if (ch.chapter_title.trim().toLowerCase() === chapterVal.trim().toLowerCase()) {
+              existingTableId = ch.table_id || null;
+              break;
+            }
+          }
+          break;
+        }
+      }
+    } catch (e) {
+      console.warn("Could not determine existing table_id:", e);
+    }
+
+    // We need CSV to reinsert; for refresh we have no CSV — so ask user to confirm they want to re-run generate (call runAutomation)
+    if (!confirm("Refresh will re-run the whole generation flow. Proceed?")) return;
+
+    // Call runAutomation which regenerates via Gemini and reuploads
+    await runAutomation({ class: classVal, subject: subjectVal, book: bookVal, chapter: chapterVal, difficulty: "Medium" });
+
+  } catch (err) {
+    console.error("Refresh failed:", err);
+    showStatus("Refresh failed: " + (err.message || err));
+  }
+}
+
+// ------------------- Initialization and bindings -------------------
+document.addEventListener("DOMContentLoaded", function () {
+  // DOM references
+  const classSel = el("classSelect");
+  const subjectSel = el("subjectSelect");
+  const bookSel = el("bookSelect");
+  const chapterSel = el("chapterSelect");
+  const generateBtn = el("generateBtn");
+  const refreshBtn = el("refreshBtn");
+  const bookContainer = el("bookContainer");
+
+  // Basic safety checks
+  if (!classSel || !subjectSel || !bookSel || !chapterSel || !generateBtn || !refreshBtn) {
+    console.error("Required DOM elements missing. UI will not initialize.");
+    appendLog("Required DOM elements missing in index.html.");
+    return;
+  }
+
+  // Initial state
+  setDisabled(subjectSel, true);
+  setDisabled(bookSel, true);
+  setDisabled(chapterSel, true);
+  generateBtn.disabled = true;
+  refreshBtn.disabled = true;
+  if (bookContainer) bookContainer.classList.add("hidden");
+
+  // Bind events
+  classSel.addEventListener("change", onClassChange);
+  subjectSel.addEventListener("change", onSubjectChange);
+  bookSel.addEventListener("change", onBookChange);
+  chapterSel.addEventListener("change", onChapterChange);
+  generateBtn.addEventListener("click", async () => {
+    // gather options from DOM and call runAutomation
+    const options = {
+      class: classSel.value,
+      subject: subjectSel.value,
+      book: bookSel.value,
+      chapter: chapterSel.value,
+      difficulty: "Medium"
+    };
+    try {
+      generateBtn.disabled = true;
+      await runAutomation(options);
+    } catch (err) {
+      // error handled in runAutomation
+    } finally {
+      generateBtn.disabled = false;
+    }
   });
+
+  refreshBtn.addEventListener("click", onRefreshClick);
+
+  appendLog("TableAutomation UI initialized. Select class to begin.");
 });
