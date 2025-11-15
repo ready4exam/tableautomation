@@ -1,179 +1,126 @@
-// gemini_frontend.js
-// -------------------------------------------------------
-// Phase-3 Stable Automation Tool (Class 5–12)
-// -------------------------------------------------------
+// js/gemini_frontend.js
+// Frontend automation script (browser). AUTO_UPDATE = YES (it will call updateCurriculum automatically)
 
-// -------------------------------------------------------
-// CONFIG
-// -------------------------------------------------------
-const BACKEND = "https://ready4exam-master-automation.vercel.app";
-
-//--------------------------------------------------------
-// LOGGING
-//--------------------------------------------------------
-function log(msg) {
-  const box = document.getElementById("log");
-  box.value += msg + "\n";
-  box.scrollTop = box.scrollHeight;
+async function loadCurriculumForClass(classNum) {
+  const url = `https://ready4exam.github.io/ready4exam-${classNum}/js/curriculum.js`;
+  const module = await import(url).catch((e) => {
+    console.error("Failed to import curriculum module:", e);
+    throw e;
+  });
+  const curriculum = module.curriculum || module.default || null;
+  if (!curriculum) throw new Error("Curriculum module did not export 'curriculum'.");
+  return curriculum;
 }
 
-// -------------------------------------------------------
-// CURRICULUM LOADER
-// -------------------------------------------------------
-function getCurriculumURL(className) {
-  const num = className.replace("class", "");
-  return `https://ready4exam.github.io/ready4exam-${num}/js/curriculum.js`;
+// UI helper (not prescriptive — adapt to your UI)
+function showStatus(msg) {
+  console.log("[TableAutomation]", msg);
+  const el = document.getElementById("automation-status");
+  if (el) el.innerText = msg;
 }
 
-async function loadCurriculum(className) {
-  log(`=== Loading Class ${className} Curriculum ===`);
+async function postJSON(path, body) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || data.message || JSON.stringify(data));
+  return data;
+}
 
+export async function runAutomation(options) {
+  // options: { class: "9", subject: "Science", book: "Science Textbook", chapter: "Force and Laws of Motion", difficulty: "Medium" }
   try {
-    const url = getCurriculumURL(className);
-    log(`📘 Loading from: ${url}`);
+    showStatus("Loading curriculum...");
+    const curriculum = await loadCurriculumForClass(options.class);
 
-    const module = await import(url + "?v=" + Date.now());
-    const curriculum = module.curriculum;
+    // locate subject / book / chapter to get existing table_id (optional)
+    const subjectKey = Object.keys(curriculum).find(k => k.toLowerCase().includes((options.subject || "").toLowerCase()));
+    if (!subjectKey) {
+      throw new Error(`Subject "${options.subject}" not found in curriculum for class ${options.class}`);
+    }
+    const books = curriculum[subjectKey];
+    // if book provided, prefer it; otherwise take first book
+    const bookKey = options.book ? Object.keys(books).find(b => b.toLowerCase().includes((options.book || "").toLowerCase())) : Object.keys(books)[0];
+    const chapters = books[bookKey];
+    const chapterObj = chapters.find(ch => ch.chapter_title.trim().toLowerCase() === options.chapter.trim().toLowerCase());
+    if (!chapterObj) {
+      throw new Error(`Chapter "${options.chapter}" not found under ${subjectKey} / ${bookKey}`);
+    }
 
-    log("✅ Curriculum loaded.");
-    return curriculum;
+    const existingTableId = chapterObj.table_id || null;
+
+    showStatus("Requesting Gemini to generate questions...");
+    const geminiRes = await postJSON("/api/gemini", { meta: { class_name: options.class, subject: subjectKey, book: bookKey, chapter: options.chapter } });
+    if (!geminiRes.ok) throw new Error(geminiRes.error || "Gemini failed");
+    const questions = geminiRes.questions;
+
+    showStatus(`Generated ${questions.length} questions. Uploading to Supabase...`);
+    // Provide meta.table_id if we want to prefer existing curriculum table id
+    const manageBody = {
+      meta: { class_name: options.class, subject: subjectKey, book: bookKey, chapter: options.chapter, table_id: existingTableId },
+      csv: questions
+    };
+
+    const manageRes = await postJSON("/api/manageSupabase", manageBody);
+    if (!manageRes.ok) throw new Error(manageRes.error || "manageSupabase failed");
+
+    const newTableId = manageRes.new_table_id || manageRes.table;
+
+    showStatus(`Table updated: ${newTableId}. Updating curriculum in class repo...`);
+
+    // AUTO_UPDATE: call updateCurriculum
+    try {
+      const updateBody = {
+        class_name: options.class,
+        subject: subjectKey,
+        chapter: options.chapter,
+        new_table_id: newTableId
+      };
+      const updateRes = await postJSON("/api/updateCurriculum", updateBody);
+      if (!updateRes.ok) {
+        console.warn("updateCurriculum returned not ok:", updateRes);
+        showStatus(`Warning: curriculum update returned error. Proceeding to quiz.`);
+      } else {
+        showStatus(`Curriculum updated in repo ${updateRes.repo}.`);
+      }
+    } catch (err) {
+      console.warn("Failed to update curriculum automatically:", err);
+      showStatus("Warning: failed to auto-update curriculum. Proceeding to quiz.");
+    }
+
+    // Redirect to quiz engine
+    const difficulty = options.difficulty || "Medium";
+    const redirectUrl = `./quiz-engine.html?table=${encodeURIComponent(newTableId)}&difficulty=${encodeURIComponent(difficulty)}`;
+    showStatus("Redirecting to quiz engine...");
+    window.location.href = redirectUrl;
+
   } catch (err) {
-    console.error(err);
-    log("❌ Failed loading curriculum.js");
-    throw err;
+    console.error("Automation failed:", err);
+    showStatus("Automation failed: " + (err.message || err));
+    alert("Automation failed: " + (err.message || err));
   }
 }
 
-// -------------------------------------------------------
-// UI ELEMENTS
-// -------------------------------------------------------
-const classSelect = document.getElementById("classSelect");
-const subjectSelect = document.getElementById("subjectSelect");
-const bookSelect = document.getElementById("bookSelect");
-const chapterSelect = document.getElementById("chapterSelect");
-const generateBtn = document.getElementById("generateBtn");
-const refreshBtn = document.getElementById("refreshBtn");
+// Example: Hook to a button (assumes page has UI for inputs)
+document.addEventListener("DOMContentLoaded", function() {
+  const runBtn = document.getElementById("run-automation");
+  if (!runBtn) return;
+  runBtn.addEventListener("click", async () => {
+    const classInput = document.getElementById("input-class").value;
+    const subjectInput = document.getElementById("input-subject").value;
+    const bookInput = document.getElementById("input-book").value;
+    const chapterInput = document.getElementById("input-chapter").value;
+    const difficultyInput = document.getElementById("input-difficulty").value || "Medium";
 
-let CURR = null;
-
-// -------------------------------------------------------
-// CLASS → SUBJECTS
-// -------------------------------------------------------
-classSelect.onchange = async () => {
-  const cls = classSelect.value;
-  if (!cls) return;
-
-  CURR = await loadCurriculum(cls);
-
-  subjectSelect.innerHTML =
-    `<option value="">-- Select Subject --</option>` +
-    Object.keys(CURR)
-      .map((s) => `<option value="${s}">${s}</option>`)
-      .join("");
-
-  subjectSelect.disabled = false;
-  bookSelect.innerHTML = "";
-  chapterSelect.innerHTML = "";
-};
-
-// -------------------------------------------------------
-// SUBJECT → BOOKS
-// -------------------------------------------------------
-subjectSelect.onchange = () => {
-  const subj = subjectSelect.value;
-  if (!subj) return;
-
-  const books = Object.keys(CURR[subj]);
-
-  if (books.length === 1) {
-    bookSelect.innerHTML = `<option>${books[0]}</option>`;
-    document.getElementById("bookContainer").classList.add("hidden");
-    loadChapters(subj, books[0]);
-  } else {
-    document.getElementById("bookContainer").classList.remove("hidden");
-
-    bookSelect.innerHTML =
-      `<option>-- Select Book --</option>` +
-      books.map((b) => `<option>${b}</option>`).join("");
-  }
-};
-
-// -------------------------------------------------------
-// BOOK → CHAPTERS
-// -------------------------------------------------------
-bookSelect.onchange = () => {
-  loadChapters(subjectSelect.value, bookSelect.value);
-};
-
-function loadChapters(subj, book) {
-  const chapters = CURR[subj][book];
-
-  chapterSelect.innerHTML =
-    `<option value="">-- Select Chapter --</option>` +
-    chapters.map((c) => `<option>${c.chapter_title}</option>`).join("");
-
-  chapterSelect.disabled = false;
-
-  generateBtn.disabled = false;
-  refreshBtn.disabled = false;
-}
-
-// -------------------------------------------------------
-// GENERATE & UPLOAD
-// -------------------------------------------------------
-generateBtn.onclick = async () => {
-  const cls = classSelect.value;
-  const subj = subjectSelect.value;
-  const book = bookSelect.value;
-  const chapter = chapterSelect.value;
-
-  log(`⚙️ Generating questions for ${chapter}...`);
-
-  const meta = {
-    class_name: cls,
-    subject: subj,
-    book,
-    chapter,
-  };
-
-  // 1️⃣ CALL GEMINI
-  const genRes = await fetch(`${BACKEND}/api/gemini`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ meta }),
+    await runAutomation({
+      class: classInput,
+      subject: subjectInput,
+      book: bookInput,
+      chapter: chapterInput,
+      difficulty: difficultyInput
+    });
   });
-
-  const gen = await genRes.json();
-
-  if (!gen.ok) {
-    log("❌ Gemini error: " + gen.error);
-    return;
-  }
-
-  log(`✅ Gemini created ${gen.questions.length} questions`);
-
-  // 2️⃣ UPLOAD TO SUPABASE
-  log("📤 Uploading to Supabase...");
-
-  const upRes = await fetch(`${BACKEND}/api/manageSupabase`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      meta,
-      csv: gen.questions,
-    }),
-  });
-
-  const up = await upRes.json();
-
-  if (!up.ok) {
-    log("❌ Upload failed: " + up.error);
-    return;
-  }
-
-  log(`✅ Uploaded ${gen.questions.length} rows to ${up.table}`);
-  log("🎉 Automation completed successfully!");
-
-  // 3️⃣ START QUIZ (use returned table from backend)
-  location.href = `quiz-engine.html?table=${up.table}&difficulty=medium`;
-};
+});
