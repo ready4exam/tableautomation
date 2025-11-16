@@ -1,9 +1,11 @@
 // js/gemini_frontend.js
-// TableAutomation frontend (Mode A — full UI + automation)
-// - Populates Class -> Subject -> Book -> Chapter dropdowns
-// - Calls /api/gemini, /api/manageSupabase, /api/updateCurriculum
-// - AUTO_UPDATE = YES (automatically updates class repo curriculum.js)
-// - Exports runAutomation(options) for programmatic use
+// TableAutomation frontend (Mode A) — FINAL corrected version
+// - Keeps UI (Class → Subject → Book → Chapter) and automation
+// - Stores curriculum in-memory (CURRENT_CURRICULUM)
+// - Always shows Book dropdown (even if single book)
+// - AUTO_UPDATE = YES (calls /api/updateCurriculum automatically)
+
+let CURRENT_CURRICULUM = null; // in-memory curriculum for selected class
 
 // ------------------- Helpers -------------------
 async function loadCurriculumForClass(classNum) {
@@ -33,7 +35,6 @@ function appendLog(text) {
 
 function showStatus(text) {
   appendLog(text);
-  // optional visual status element
   const statusEl = el("automation-status");
   if (statusEl) statusEl.innerText = text;
 }
@@ -49,12 +50,13 @@ async function postJSON(path, body) {
   return data;
 }
 
-// ------------------- UI population -------------------
+// ------------------- Select utils -------------------
 function clearSelect(sel) {
   sel.innerHTML = "";
 }
 
 function setDisabled(sel, disabled = true) {
+  if (!sel) return;
   sel.disabled = disabled;
   if (disabled) sel.classList.add("opacity-50");
   else sel.classList.remove("opacity-50");
@@ -74,7 +76,19 @@ function fillSelectWithArray(sel, arr, placeholder = "-- Select --") {
   }
 }
 
-// Given curriculum object, return sorted subject keys
+// ------------------- Curriculum helpers -------------------
+// curriculum shape:
+// {
+//   "SubjectDisplayName": {
+//     "BookName": [
+//       { chapter_title: "...", table_id: "...", section: "..." },
+//       ...
+//     ],
+//     ...
+//   },
+//   ...
+// }
+
 function getSubjectKeys(curriculum) {
   return Object.keys(curriculum || {}).sort();
 }
@@ -87,11 +101,11 @@ function getBookKeysForSubject(curriculum, subjectKey) {
 
 function getChaptersForBook(curriculum, subjectKey, bookKey) {
   if (!curriculum || !subjectKey || !bookKey) return [];
-  const chapters = curriculum[subjectKey][bookKey] || [];
+  const chapters = curriculum[subjectKey] && curriculum[subjectKey][bookKey];
   return Array.isArray(chapters) ? chapters : [];
 }
 
-// ------------------- DOM-binding functions -------------------
+// ------------------- Event Handlers -------------------
 async function onClassChange() {
   try {
     const classSel = el("classSelect");
@@ -102,8 +116,7 @@ async function onClassChange() {
     const generateBtn = el("generateBtn");
     const refreshBtn = el("refreshBtn");
 
-    const classNum = classSel.value;
-    // reset subsequent controls
+    // reset UI
     clearSelect(subjectSel);
     clearSelect(bookSel);
     clearSelect(chapterSel);
@@ -112,8 +125,10 @@ async function onClassChange() {
     setDisabled(chapterSel, true);
     generateBtn.disabled = true;
     refreshBtn.disabled = true;
-    bookContainer.classList.add("hidden");
 
+    bookContainer.classList.remove("hidden"); // Mode A: always show book dropdown
+
+    const classNum = classSel.value;
     if (!classNum) {
       showStatus("Select a class.");
       return;
@@ -121,6 +136,7 @@ async function onClassChange() {
 
     showStatus(`Loading curriculum for class ${classNum}...`);
     const curriculum = await loadCurriculumForClass(classNum);
+    CURRENT_CURRICULUM = curriculum; // store in memory
 
     const subjects = getSubjectKeys(curriculum);
     if (!subjects.length) {
@@ -128,13 +144,15 @@ async function onClassChange() {
       return;
     }
 
-    // populate subjects
     fillSelectWithArray(subjectSel, subjects, "-- Select Subject --");
     setDisabled(subjectSel, false);
-    showStatus(`Loaded ${subjects.length} subjects for class ${classNum}.`);
+    // always show book dropdown (Mode A)
+    fillSelectWithArray(bookSel, ["-- Select Book --"], "-- Select Book --");
+    setDisabled(bookSel, true);
+    clearSelect(chapterSel);
+    setDisabled(chapterSel, true);
 
-    // store curriculum in element for later use
-    subjectSel.dataset.curriculum = JSON.stringify(curriculum);
+    showStatus(`Loaded ${subjects.length} subjects for class ${classNum}.`);
   } catch (err) {
     console.error("onClassChange error:", err);
     showStatus("Error loading curriculum: " + (err.message || err));
@@ -151,45 +169,39 @@ function onSubjectChange() {
     const generateBtn = el("generateBtn");
     const refreshBtn = el("refreshBtn");
 
-    // reset lower controls
+    // reset downstream
     clearSelect(bookSel);
     clearSelect(chapterSel);
     setDisabled(bookSel, true);
     setDisabled(chapterSel, true);
     generateBtn.disabled = true;
     refreshBtn.disabled = true;
-    bookContainer.classList.add("hidden");
+    bookContainer.classList.remove("hidden"); // always show book dropdown (Mode A)
 
     const subjectKey = subjectSel.value;
     if (!subjectKey) {
+      showStatus("Select a subject.");
       return;
     }
 
-    const curriculum = JSON.parse(subjectSel.dataset.curriculum || subjectSel.parentElement.dataset.curriculum || "{}");
+    const curriculum = CURRENT_CURRICULUM;
     const books = getBookKeysForSubject(curriculum, subjectKey);
 
     if (!books.length) {
-      // If no multiple books, but chapters array might be directly under subject as a single book
-      // However our curriculum shape is subject -> book -> chapters, so handle gracefully
-      showStatus(`No book entries found for subject "${subjectKey}".`);
+      showStatus(`No books found for subject "${subjectKey}".`);
       return;
     }
 
-    // If only one book, show book selector but preselect first
     fillSelectWithArray(bookSel, books, "-- Select Book --");
     setDisabled(bookSel, false);
-    if (books.length === 1) {
-      bookSel.selectedIndex = 1; // pick the only book
-      bookContainer.classList.remove("hidden");
-      // trigger book change manually
-      onBookChange();
-    } else {
-      bookContainer.classList.remove("hidden");
-    }
 
-    showStatus(`Loaded ${books.length} books for subject ${subjectKey}.`);
-    // carry curriculum data to bookSel for convenience
-    bookSel.dataset.curriculum = subjectSel.dataset.curriculum;
+    // Do not auto-select single book (Mode A asks to always show book)
+    clearSelect(chapterSel);
+    setDisabled(chapterSel, true);
+    generateBtn.disabled = true;
+    refreshBtn.disabled = true;
+
+    showStatus(`Loaded ${books.length} books for subject "${subjectKey}".`);
   } catch (err) {
     console.error("onSubjectChange error:", err);
     showStatus("Error while selecting subject: " + (err.message || err));
@@ -214,15 +226,14 @@ function onBookChange() {
     const bookKey = bookSel.value;
     if (!subjectKey || !bookKey) return;
 
-    const curriculum = JSON.parse(bookSel.dataset.curriculum || "{}");
+    const curriculum = CURRENT_CURRICULUM;
     const chapters = getChaptersForBook(curriculum, subjectKey, bookKey);
     if (!chapters.length) {
       showStatus(`No chapters found for ${subjectKey} / ${bookKey}`);
       return;
     }
 
-    // prepare options: display chapter_title and keep index or table_id as value (we'll use chapter_title for matching)
-    clearSelect(chapterSel);
+    // populate chapter select with chapter_title values
     const empty = document.createElement("option");
     empty.value = "";
     empty.text = "-- Select Chapter --";
@@ -253,52 +264,47 @@ function onChapterChange() {
   refreshBtn.disabled = !has;
 }
 
-// ------------------- Automation (core) -------------------
+// ------------------- Automation core -------------------
 export async function runAutomation(options) {
-  // options may be provided or read from DOM
   try {
-    // read DOM values if options not fully provided
     const classVal = options?.class || el("classSelect").value;
     const subjectVal = options?.subject || el("subjectSelect").value;
     const bookVal = options?.book || el("bookSelect").value;
     const chapterVal = options?.chapter || el("chapterSelect").value;
     const difficultyVal = options?.difficulty || "Medium";
 
-    if (!classVal || !subjectVal || !chapterVal) {
-      throw new Error("Please select class, subject and chapter before generating.");
+    if (!classVal || !subjectVal || !bookVal || !chapterVal) {
+      throw new Error("Please select class, subject, book and chapter before generating.");
     }
 
     showStatus(`Starting automation: Class ${classVal} / ${subjectVal} / ${bookVal} / ${chapterVal}`);
 
-    // Step 1: generate via Gemini
+    // Step 1: Gemini
     showStatus("Requesting Gemini to generate questions...");
     const geminiRes = await postJSON("/api/gemini", { meta: { class_name: classVal, subject: subjectVal, book: bookVal, chapter: chapterVal } });
     if (!geminiRes.ok) throw new Error(geminiRes.error || "Gemini failed.");
-    const questions = geminiRes.questions;
+    const questions = geminiRes.questions || [];
     showStatus(`Gemini produced ${questions.length} questions.`);
 
-    // Step 2: call manageSupabase to create table and insert
-    // Try to read existing table_id from curriculum for preference
+    // Step 2: manageSupabase
+    // Attempt to read existing table_id from CURRENT_CURRICULUM to prefer it
     let existingTableId = null;
     try {
-      const curr = await loadCurriculumForClass(classVal);
-      // locate chapter in curriculum and get table_id if exists
-      const subjKeys = Object.keys(curr);
-      let found = false;
+      const curriculum = CURRENT_CURRICULUM || await loadCurriculumForClass(classVal);
+      const subjKeys = Object.keys(curriculum || {});
       for (const sk of subjKeys) {
-        if (sk.toLowerCase().includes(subjectVal.toLowerCase())) {
-          const books = curr[sk];
-          const bk = bookVal || Object.keys(books)[0];
+        if (sk.toLowerCase() === subjectVal.toLowerCase() || sk.toLowerCase().includes(subjectVal.toLowerCase())) {
+          const books = curriculum[sk];
+          const bk = bookVal;
           const chapters = books[bk] || [];
           for (const ch of chapters) {
-            if (ch.chapter_title.trim().toLowerCase() === chapterVal.trim().toLowerCase()) {
+            if (ch.chapter_title && ch.chapter_title.trim().toLowerCase() === chapterVal.trim().toLowerCase()) {
               existingTableId = ch.table_id || null;
-              found = true;
               break;
             }
           }
+          break;
         }
-        if (found) break;
       }
     } catch (e) {
       console.warn("Could not determine existing table_id:", e);
@@ -315,7 +321,7 @@ export async function runAutomation(options) {
     const newTableId = manageRes.new_table_id || manageRes.table;
     showStatus(`Supabase: table updated -> ${newTableId}`);
 
-    // Step 3: auto-update curriculum
+    // Step 3: updateCurriculum (AUTO_UPDATE)
     try {
       showStatus("Updating curriculum in class repo...");
       const updateBody = { class_name: classVal, subject: subjectVal, chapter: chapterVal, new_table_id: newTableId };
@@ -324,14 +330,14 @@ export async function runAutomation(options) {
         console.warn("updateCurriculum returned not ok:", updateRes);
         showStatus("Warning: updateCurriculum returned not-ok. Proceeding to quiz.");
       } else {
-        showStatus(`Curriculum updated in ${updateRes.repo}`);
+        showStatus(`Curriculum updated in ${updateRes.repo || 'unknown repo'}`);
       }
     } catch (err) {
       console.warn("Auto-update failed:", err);
       showStatus("Warning: failed to auto-update curriculum. Proceeding to quiz.");
     }
 
-    // Step 4: Redirect to quiz-engine
+    // Step 4: redirect to quiz-engine
     showStatus("Redirecting to quiz engine...");
     const redirectUrl = `./quiz-engine.html?table=${encodeURIComponent(newTableId)}&difficulty=${encodeURIComponent(difficultyVal)}`;
     window.location.href = redirectUrl;
@@ -344,46 +350,20 @@ export async function runAutomation(options) {
   }
 }
 
-// ------------------- Refresh (re-run manageSupabase) -------------------
+// ------------------- Refresh flow -------------------
 async function onRefreshClick() {
   try {
     const classVal = el("classSelect").value;
     const subjectVal = el("subjectSelect").value;
     const bookVal = el("bookSelect").value;
     const chapterVal = el("chapterSelect").value;
-    if (!classVal || !subjectVal || !chapterVal) {
-      alert("Select class, subject, chapter first.");
+    if (!classVal || !subjectVal || !bookVal || !chapterVal) {
+      alert("Select class, subject, book, chapter first.");
       return;
     }
 
-    showStatus("Refreshing table (re-run manageSupabase)...");
-    // Try to fetch existing curriculum table id
-    let existingTableId = null;
-    try {
-      const curr = await loadCurriculumForClass(classVal);
-      const subjKeys = Object.keys(curr);
-      for (const sk of subjKeys) {
-        if (sk.toLowerCase().includes(subjectVal.toLowerCase())) {
-          const books = curr[sk];
-          const bk = bookVal || Object.keys(books)[0];
-          const chapters = books[bk] || [];
-          for (const ch of chapters) {
-            if (ch.chapter_title.trim().toLowerCase() === chapterVal.trim().toLowerCase()) {
-              existingTableId = ch.table_id || null;
-              break;
-            }
-          }
-          break;
-        }
-      }
-    } catch (e) {
-      console.warn("Could not determine existing table_id:", e);
-    }
+    if (!confirm("Refresh will re-run generation (Gemini -> Supabase -> updateCurriculum). Proceed?")) return;
 
-    // We need CSV to reinsert; for refresh we have no CSV — so ask user to confirm they want to re-run generate (call runAutomation)
-    if (!confirm("Refresh will re-run the whole generation flow. Proceed?")) return;
-
-    // Call runAutomation which regenerates via Gemini and reuploads
     await runAutomation({ class: classVal, subject: subjectVal, book: bookVal, chapter: chapterVal, difficulty: "Medium" });
 
   } catch (err) {
@@ -394,7 +374,6 @@ async function onRefreshClick() {
 
 // ------------------- Initialization and bindings -------------------
 document.addEventListener("DOMContentLoaded", function () {
-  // DOM references
   const classSel = el("classSelect");
   const subjectSel = el("subjectSelect");
   const bookSel = el("bookSelect");
@@ -403,20 +382,19 @@ document.addEventListener("DOMContentLoaded", function () {
   const refreshBtn = el("refreshBtn");
   const bookContainer = el("bookContainer");
 
-  // Basic safety checks
   if (!classSel || !subjectSel || !bookSel || !chapterSel || !generateBtn || !refreshBtn) {
     console.error("Required DOM elements missing. UI will not initialize.");
     appendLog("Required DOM elements missing in index.html.");
     return;
   }
 
-  // Initial state
+  // initial state
   setDisabled(subjectSel, true);
   setDisabled(bookSel, true);
   setDisabled(chapterSel, true);
   generateBtn.disabled = true;
   refreshBtn.disabled = true;
-  if (bookContainer) bookContainer.classList.add("hidden");
+  if (bookContainer) bookContainer.classList.remove("hidden"); // Mode A: always show book dropdown
 
   // Bind events
   classSel.addEventListener("change", onClassChange);
@@ -424,24 +402,15 @@ document.addEventListener("DOMContentLoaded", function () {
   bookSel.addEventListener("change", onBookChange);
   chapterSel.addEventListener("change", onChapterChange);
   generateBtn.addEventListener("click", async () => {
-    // gather options from DOM and call runAutomation
-    const options = {
-      class: classSel.value,
-      subject: subjectSel.value,
-      book: bookSel.value,
-      chapter: chapterSel.value,
-      difficulty: "Medium"
-    };
+    generateBtn.disabled = true;
     try {
-      generateBtn.disabled = true;
-      await runAutomation(options);
-    } catch (err) {
-      // error handled in runAutomation
+      await runAutomation({});
+    } catch (e) {
+      // handled inside runAutomation
     } finally {
       generateBtn.disabled = false;
     }
   });
-
   refreshBtn.addEventListener("click", onRefreshClick);
 
   appendLog("TableAutomation UI initialized. Select class to begin.");
