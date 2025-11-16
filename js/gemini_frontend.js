@@ -11,11 +11,13 @@ let CURRENT_CURRICULUM = null;
 
 // ------------------- Helpers -------------------
 async function loadCurriculumForClass(classNum) {
-  const url = `https://ready4exam.github.io/ready4exam-${classNum}/js/curriculum.js`;
-  const module = await import(url).catch((e) => {
+ const url = `https://ready4exam.github.io/ready4exam-${classNum}/js/curriculum.js`;
+ const version = Date.now(); // cache buster
+ const module = await import(`${url}?v=${version}`).catch((e) => {
     console.error("Failed to import curriculum module:", e);
     throw e;
   });
+
   const curriculum = module.curriculum || module.default || null;
   if (!curriculum) throw new Error("Curriculum module did not export 'curriculum'.");
   return curriculum;
