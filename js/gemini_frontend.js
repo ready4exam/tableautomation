@@ -3,7 +3,7 @@
 // - Class → Subject → Book → Chapter UI
 // - Calls MasterAutomation backend APIs
 // - Updates class repo curriculum table_id
-// - Redirects to quiz-engine with table & difficulty
+// - After success: reset UI for next table creation (no redirect)
 
 const API_BASE = "https://ready4exam-master-automation.vercel.app";
 
@@ -253,7 +253,7 @@ export async function runAutomation(options) {
     const subjectVal = options?.subject || el("subjectSelect").value;
     const bookVal = options?.book || el("bookSelect").value;
     const chapterVal = options?.chapter || el("chapterSelect").value;
-    const difficultyVal = options?.difficulty || "Medium"; // Option 2: difficulty-aware, UI can extend later
+    const difficultyVal = options?.difficulty || "Medium";
 
     if (!classVal || !subjectVal || !bookVal || !chapterVal) {
       throw new Error("Please select class, subject, book and chapter before generating.");
@@ -261,85 +261,67 @@ export async function runAutomation(options) {
 
     showStatus(`Starting automation: Class ${classVal} / ${subjectVal} / ${bookVal} / ${chapterVal}`);
 
-    // 1) Gemini — generate questions
+    // 1️⃣ Gemini
     showStatus("Requesting Gemini to generate questions...");
     const geminiRes = await postJSON("/api/gemini", {
-      meta: { class_name: classVal, subject: subjectVal, book: bookVal, chapter: chapterVal, difficulty: difficultyVal }
+      meta: { class_name: classVal, subject: subjectVal, book: bookVal, chapter: chapterVal }
     });
     if (!geminiRes.ok) throw new Error(geminiRes.error || "Gemini failed.");
     const questions = geminiRes.questions || [];
     if (!questions.length) throw new Error("Gemini returned no questions.");
     showStatus(`Gemini produced ${questions.length} questions.`);
 
-    // 2) Decide existing table_id from CURRENT_CURRICULUM (if it's a string and not a numeric placeholder)
-    let existingTableId = null;
-    try {
-      const curriculum = CURRENT_CURRICULUM || await loadCurriculumForClass(classVal);
-      const subjKeys = Object.keys(curriculum || {});
-      for (const sk of subjKeys) {
-        if (sk.toLowerCase() === subjectVal.toLowerCase() || sk.toLowerCase().includes(subjectVal.toLowerCase())) {
-          const books = curriculum[sk];
-          const bk = bookVal;
-          const chapters = books[bk] || [];
-          for (const ch of chapters) {
-            if (ch.chapter_title && ch.chapter_title.trim().toLowerCase() === chapterVal.trim().toLowerCase()) {
-              const tid = ch.table_id;
-              if (tid && isNaN(Number(tid))) {
-                existingTableId = tid;
-              }
-              break;
-            }
-          }
-          break;
-        }
-      }
-    } catch (e) {
-      console.warn("Could not determine existing table_id:", e);
-    }
-
-    // 3) manageSupabase — create/reset table & insert questions
+    // 2️⃣ manageSupabase
     showStatus("Uploading questions to Supabase...");
-    const manageBody = {
-      meta: { class_name: classVal, subject: subjectVal, book: bookVal, chapter: chapterVal, table_id: existingTableId },
+    const manageRes = await postJSON("/api/manageSupabase", {
+      meta: { class_name: classVal, subject: subjectVal, book: bookVal, chapter: chapterVal },
       csv: questions
-    };
-    const manageRes = await postJSON("/api/manageSupabase", manageBody);
+    });
     if (!manageRes.ok) throw new Error(manageRes.error || "manageSupabase failed");
     const newTableId = manageRes.new_table_id || manageRes.table;
-    showStatus(`Supabase: table updated -> ${newTableId}`);
+    showStatus(`Supabase: table updated → ${newTableId}`);
 
-    // 4) updateCurriculum — write new table_id to class repo curriculum.js
+    // 3️⃣ updateCurriculum
+    showStatus("Updating curriculum in class repo...");
     try {
-      showStatus("Updating curriculum in class repo...");
-      const updateBody = {
+      const updateRes = await postJSON("/api/updateCurriculum", {
         class_name: classVal,
         subject: subjectVal,
         book: bookVal,
         chapter: chapterVal,
         new_table_id: newTableId
-      };
-      const updateRes = await postJSON("/api/updateCurriculum", updateBody);
+      });
+
       if (!updateRes.ok) {
         console.warn("updateCurriculum returned not ok:", updateRes);
-        showStatus("Warning: updateCurriculum returned not-ok. Proceeding to quiz.");
+        showStatus("⚠️ Curriculum update issue: Proceeding anyway.");
       } else {
-        showStatus(`Curriculum updated in ${updateRes.repo || "class repo"}.`);
+        showStatus("Curriculum updated successfully in repo.");
       }
     } catch (err) {
-      console.warn("Auto-update failed:", err);
-      showStatus("Warning: failed to auto-update curriculum. Proceeding to quiz.");
+      console.warn("Failed to call updateCurriculum:", err);
     }
 
-    // 5) Redirect to quiz-engine
-    showStatus("Redirecting to quiz engine...");
-    const redirectUrl = `./quiz-engine.html?table=${encodeURIComponent(newTableId)}&difficulty=${encodeURIComponent(difficultyVal)}`;
-    window.location.href = redirectUrl;
+    // ----------------------------
+    // ✅ FINAL UI RESET FIX — No Redirect
+    // ----------------------------
+    showStatus("Done! Ready for next chapter.");
+    alert("✔ Quiz Uploaded Successfully!\nYou can generate the next chapter now.");
+
+    CURRENT_CURRICULUM = await loadCurriculumForClass(classVal);
+
+    // Reset
+    const chapterSel = el("chapterSelect");
+    chapterSel.value = "";
+    const generateBtn = el("generateBtn");
+    const refreshBtn = el("refreshBtn");
+    generateBtn.disabled = true;
+    refreshBtn.disabled = true;
 
   } catch (err) {
     console.error("runAutomation error:", err);
     showStatus("Automation failed: " + (err.message || err));
     alert("Automation failed: " + (err.message || err));
-    throw err;
   }
 }
 
@@ -354,12 +336,17 @@ async function onRefreshClick() {
       alert("Select class, subject, book, chapter first.");
       return;
     }
-    if (!confirm("Refresh will re-run generation (Gemini → Supabase → updateCurriculum). Proceed?")) return;
+    if (!confirm("Refresh & regenerate questions?")) return;
 
-    await runAutomation({ class: classVal, subject: subjectVal, book: bookVal, chapter: chapterVal, difficulty: "Medium" });
+    await runAutomation({
+      class: classVal,
+      subject: subjectVal,
+      book: bookVal,
+      chapter: chapterVal,
+      difficulty: "Medium"
+    });
   } catch (err) {
     console.error("Refresh failed:", err);
-    showStatus("Refresh failed: " + (err.message || err));
   }
 }
 
@@ -374,9 +361,7 @@ document.addEventListener("DOMContentLoaded", function () {
   const bookContainer = el("bookContainer");
 
   if (!classSel || !subjectSel || !bookSel || !chapterSel || !generateBtn || !refreshBtn) {
-    console.error("Required DOM elements missing. UI will not initialize.");
-    appendLog("Required DOM elements missing in index.html.");
-    return;
+    return console.error("Missing DOM");
   }
 
   setDisabled(subjectSel, true);
@@ -390,17 +375,8 @@ document.addEventListener("DOMContentLoaded", function () {
   subjectSel.addEventListener("change", onSubjectChange);
   bookSel.addEventListener("change", onBookChange);
   chapterSel.addEventListener("change", onChapterChange);
-
-  generateBtn.addEventListener("click", async () => {
-    generateBtn.disabled = true;
-    try {
-      await runAutomation({});
-    } finally {
-      generateBtn.disabled = false;
-    }
-  });
-
+  generateBtn.addEventListener("click", () => runAutomation({}));
   refreshBtn.addEventListener("click", onRefreshClick);
 
-  appendLog("TableAutomation UI initialized. Select class to begin.");
+  appendLog("Ready4Exam TableAutomation Ready");
 });
