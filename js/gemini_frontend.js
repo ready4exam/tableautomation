@@ -233,7 +233,12 @@ export async function runAutomation(options) {
       throw new Error("Select all dropdowns before generating.");
 
     const existingTable = getExistingTableId(classVal, subjectVal, bookVal, chapterVal);
-    const isRefresh = Boolean(existingTable);
+
+    // 🔥 FIX: Refresh only when existing table_id is REAL (contains "_quiz")
+    const isRefresh =
+      existingTable &&
+      typeof existingTable === "string" &&
+      existingTable.includes("_quiz");
 
     showStatus(`Starting ${isRefresh ? "Refresh" : "Automation"}: ${chapterVal}`);
 
