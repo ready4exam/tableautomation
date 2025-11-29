@@ -11,7 +11,7 @@ let CURRENT_CURRICULUM = null;
 
 // ------------------- Helpers -------------------
 async function loadCurriculumForClass(classNum) {
-  const url = `https://ready4exam.github.io/ready4exam-${classNum}/js/curriculum.js`;
+  const url = `https://ready4exam.github.io/ready4exam-class-${classNum}/js/curriculum.js`;
   const version = Date.now();
   const module = await import(`${url}?v=${version}`).catch((e) => {
     console.error("Failed to import curriculum module:", e);
