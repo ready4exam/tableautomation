@@ -234,6 +234,7 @@ export async function runAutomation(options) {
 
     const existingTable = getExistingTableId(classVal, subjectVal, bookVal, chapterVal);
 
+    // 🔥 FIX: Refresh only when existing table_id is REAL (contains "_quiz")
     const isRefresh =
       existingTable &&
       typeof existingTable === "string" &&
@@ -241,6 +242,7 @@ export async function runAutomation(options) {
 
     showStatus(`Starting ${isRefresh ? "Refresh" : "Automation"}: ${chapterVal}`);
 
+    // 1️⃣ Gemini
     showStatus("Requesting Gemini...");
     const geminiRes = await postJSON("/api/gemini", {
       meta: { class_name: classVal, subject: subjectVal, book: bookVal, chapter: chapterVal }
@@ -248,11 +250,9 @@ export async function runAutomation(options) {
     const questions = geminiRes.questions || [];
     showStatus(`Gemini produced ${questions.length} questions.`);
 
+    // 2️⃣ manageSupabase
     showStatus(`${isRefresh ? "Refreshing" : "Uploading"} to Supabase...`);
-
-    // 🔥 ONLY FIX → MODE ADDED (NO REMOVALS ANYWHERE)
     const manageRes = await postJSON("/api/manageSupabase", {
-      mode: isRefresh ? "refresh" : "generate",   // ← REQUIRED FOR BACKEND
       meta: { class_name: classVal, subject: subjectVal, book: bookVal, chapter: chapterVal },
       csv: questions
     });
@@ -260,6 +260,7 @@ export async function runAutomation(options) {
     const newTableId = manageRes.new_table_id;
     showStatus(`Supabase table → ${newTableId}`);
 
+    // 3️⃣ updateCurriculum — ONLY IF FIRST RUN
     if (!isRefresh) {
       showStatus("Updating curriculum...");
       try {
@@ -272,7 +273,7 @@ export async function runAutomation(options) {
         });
         showStatus("Curriculum updated.");
         CURRENT_CURRICULUM = await loadCurriculumForClass(classVal);
-        onBookChange();
+        onBookChange(); // update dropdown
       } catch (err) {
         console.warn("curriculum update failed", err);
       }
