@@ -36,10 +36,7 @@ async function loadCurriculumForClass(classNum) {
     repoList = [`ready4exam-class-${classNum}`];
 
   } else if (classNum === "11") {
-    repoList = [
-      "ready4exam-11",          // PRIMARY
-      "ready4exam-class-11"     // FALLBACK
-    ];
+    repoList = ["ready4exam-class-11"];
 
   } else if (classNum === "12") {
     repoList = ["ready4exam-class-12"];
