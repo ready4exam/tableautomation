@@ -15,53 +15,41 @@
 const API_BASE = "https://ready4exam-master-automation.vercel.app";
 
 let CURRENT_CURRICULUM = null;
-// Tracks whether the current subject uses a "book" layer (true for 11/12 physics-type structures)
 let CURRENT_REQUIRES_BOOK = false;
 
 
 // ======================================================================================================
-// SECTION 1 — CURRICULUM LOADER ENGINE  (UPDATED PATH ONLY — NO OTHER CHANGE)
+// SECTION 1 — CURRICULUM LOADER  (NOW FIXED — 5→12 same repository rule applied)
 // ======================================================================================================
-//   Class 5 – 10  = ready4exam-class-{N}/js/curriculum.js
-//   Class 11      = ready4exam-11/js/curriculum.js first, then fallback → ready4exam-class-11/js/curriculum.js
-//   Class 12      = ready4exam-class-12/js/curriculum.js
+//   ALL CLASSES NOW LOAD FROM:
+//   https://ready4exam.github.io/ready4exam-class-{X}/js/curriculum.js
 // ======================================================================================================
 
 async function loadCurriculumForClass(classNum) {
 
   classNum = String(classNum).trim();
-  let repoList = [];
 
-  if (["5","6","7","8","9","10"].includes(classNum)) {
-    repoList = [`ready4exam-class-${classNum}`];
-
-  } else if (classNum === "11") {
-    repoList = ["ready4exam-class-11"];
-
-  } else if (classNum === "12") {
-    repoList = ["ready4exam-class-12"];
-
-  } else {
+  if (!["5","6","7","8","9","10","11","12"].includes(classNum)) {
     throw new Error(`❌ Invalid class selected: ${classNum}`);
   }
 
-  for (const repo of repoList) {
-    const url = `https://ready4exam.github.io/${repo}/js/curriculum.js?v=${Date.now()}`;
-    console.log(`📘 Attempting curriculum load → ${url}`);
+  const repo = `ready4exam-class-${classNum}`;
+  const url = `https://ready4exam.github.io/${repo}/js/curriculum.js?v=${Date.now()}`;
 
-    try {
-      const module = await import(url);
-      const curriculum = module.curriculum || module.default || null;
-      if (curriculum) {
-        console.log(`✔ Curriculum loaded from → ${repo}`);
-        return curriculum;
-      }
-    } catch (err) {
-      console.warn(`⚠ Failed to load from repo ${repo}, trying next...`);
+  console.log(`📘 Attempting curriculum load → ${url}`);
+
+  try {
+    const module = await import(url);
+    const curriculum = module.curriculum || module.default || null;
+    if (curriculum) {
+      console.log(`✔ Curriculum loaded from → ${repo}`);
+      return curriculum;
     }
+  } catch (err) {
+    console.warn(`⚠ Failed to load curriculum from ${url}`);
   }
 
-  throw new Error("❌ curriculum.js could not be loaded from any repository.");
+  throw new Error("❌ curriculum.js could not be loaded.");
 }
 
 
@@ -185,9 +173,7 @@ export async function runAutomation(options){
     alert("✔ Automation completed.");
     el("chapterSelect").value="";el("generateBtn").disabled=true;el("refreshBtn").disabled=true;
 
-  }catch(err){alert("Failed: "+err.message);showStatus("Failed: "+err.message);}
-}
-
+  }catch(err){alert("Failed: "+err.message);showStatus("Failed: "+err.message);}}
 async function onRefreshClick(){await runAutomation({});}
 
 
