@@ -5,6 +5,7 @@
   "main": "index.js",
   "type": "module",
   "dependencies": {
-    "@supabase/supabase-js": "^2.47.2"
+    "@supabase/supabase-js": "^2.47.2",
+    "transliteration": "^2.3.5"
   }
 }
