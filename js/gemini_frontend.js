@@ -1,65 +1,56 @@
-// ======================================================================================================
-// gemini_frontend.js — FINAL PRODUCTION VERSION WITH BULK MODE + META FIX
-// ======================================================================================================
+// ============================================================================
+// gemini_frontend.js — FINAL FIXED VERSION (Meta Safe + Bulk Safe)
+// ============================================================================
 
 const API_BASE = "https://ready4exam-master-automation.vercel.app";
 
 let CURRENT_CURRICULUM = null;
 let CURRENT_REQUIRES_BOOK = false;
 
-
-// ======================================================================================================
-// HELPERS
-// ======================================================================================================
-
+// ---------------------------------------------------------
+// BASIC HELPERS
+// ---------------------------------------------------------
 function el(id) { return document.getElementById(id); }
 
-function appendLog(text) {
-  const textarea = el("log");
+function appendLog(msg) {
   const ts = new Date().toISOString();
-  textarea.value = `${ts}  ${text}\n` + textarea.value;
+  el("log").value = `${ts} - ${msg}\n` + el("log").value;
 }
 
-function showStatus(text) { appendLog(text); }
-
-async function postJSON(path, payload) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || data.message || "Request failed");
-  return data;
-}
+function showStatus(msg) { appendLog(msg); }
 
 function clearSelect(sel) { sel.innerHTML = ""; }
 
-function setDisabled(sel, disabled = true) {
-  sel.disabled = disabled;
-  if (disabled) sel.classList.add("opacity-50");
-  else sel.classList.remove("opacity-50");
+function setDisabled(sel, val = true) {
+  sel.disabled = val;
+  val ? sel.classList.add("opacity-50") : sel.classList.remove("opacity-50");
 }
 
-function fillSelect(sel, arr, placeholder = "-- Select --") {
+function fillSelect(sel, items, placeholder = "-- Select --") {
   clearSelect(sel);
-  const first = document.createElement("option");
-  first.value = "";
-  first.text = placeholder;
-  sel.appendChild(first);
-  for (const item of arr) {
+  sel.innerHTML = `<option value="">${placeholder}</option>`;
+  items.forEach(v => {
     const o = document.createElement("option");
-    o.value = item;
-    o.text = item;
+    o.value = v;
+    o.textContent = v;
     sel.appendChild(o);
-  }
+  });
 }
 
+async function postJSON(path, data) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || "Request failed");
+  return json;
+}
 
-// ======================================================================================================
-// META FIX — ALWAYS RETURN A COMPLETE META OBJECT (Guarantees usage_logs update)
-// ======================================================================================================
+// ---------------------------------------------------------
+// ALWAYS SAFE META (fix = ensures usage_logs always updates)
+// ---------------------------------------------------------
 function buildCleanMeta(classVal, subjectVal, bookVal, chapterVal) {
   return {
     class_name: classVal || "",
@@ -69,141 +60,100 @@ function buildCleanMeta(classVal, subjectVal, bookVal, chapterVal) {
   };
 }
 
-
-// ======================================================================================================
-// CURRICULUM LOADER (unchanged)
-// ======================================================================================================
-
+// ---------------------------------------------------------
+// Curriculum Loader
+// ---------------------------------------------------------
 async function loadCurriculumForClass(classNum) {
   const repo = `ready4exam-class-${classNum}`;
   const url = `https://ready4exam.github.io/${repo}/js/curriculum.js?v=${Date.now()}`;
 
-  console.log(`📘 Attempting curriculum load → ${url}`);
-
   try {
-    const module = await import(url);
-    const curriculum = module.curriculum || module.default || null;
-    if (curriculum) return curriculum;
+    const m = await import(url);
+    return m.curriculum || m.default;
   } catch (err) {
-    console.warn("⚠ Failed to load curriculum", err);
+    throw new Error("❌ Cannot load curriculum");
   }
-
-  throw new Error("❌ curriculum.js could not be loaded.");
 }
 
-
-// ======================================================================================================
-// UI DROPDOWNS (unchanged)
-// ======================================================================================================
-
-function getSubjectKeys(curriculum) {
-  return Object.keys(curriculum || {}).sort();
+// ---------------------------------------------------------
+// Curriculum Helpers
+// ---------------------------------------------------------
+function getUniqueChapters(list) {
+  const seen = new Set();
+  return list.filter(c => {
+    if (!c?.chapter_title) return false;
+    if (seen.has(c.chapter_title)) return false;
+    seen.add(c.chapter_title);
+    return true;
+  });
 }
 
-function getBooksForSubject(curriculum, subjectKey) {
-  const s = curriculum?.[subjectKey];
-  if (!s || Array.isArray(s)) return [];
-  return Object.keys(s).sort();
+function getSubjectKeys(c) { return Object.keys(c).sort(); }
+function getBooksForSubject(c, s) {
+  if (!c[s] || Array.isArray(c[s])) return [];
+  return Object.keys(c[s]).sort();
+}
+function getChapters(c, subject, book) {
+  if (!c[subject]) return [];
+  if (Array.isArray(c[subject])) return c[subject];
+  return c[subject][book] || [];
 }
 
-function getChaptersForBook(curriculum, subjectKey, bookKey) {
-  const s = curriculum?.[subjectKey];
-  if (!s) return [];
-  if (Array.isArray(s)) return s;
-  return s[bookKey] || [];
-}
-
-function getExistingTableId(classVal, subjectVal, bookVal, chapterVal) {
-  let chapters = [];
-  const s = CURRENT_CURRICULUM?.[subjectVal];
-  if (!s) return null;
-  chapters = Array.isArray(s)
-    ? s
-    : (CURRENT_CURRICULUM?.[subjectVal]?.[bookVal] || []);
-  const ch = chapters.find(c => c.chapter_title === chapterVal);
-  return ch?.table_id || null;
-}
-
-
-// ======================================================================================================
-// EVENT HANDLERS (unchanged)
-// ======================================================================================================
-
+// ---------------------------------------------------------
+// DROPDOWN EVENTS
+// ---------------------------------------------------------
 async function onClassChange() {
-  try {
-    const classVal = el("classSelect").value;
-    const subjectSel = el("subjectSelect");
-    const bookSel = el("bookSelect");
-    const chapterSel = el("chapterSelect");
+  const classVal = el("classSelect").value;
+  const subjectSel = el("subjectSelect");
+  const bookSel = el("bookSelect");
+  const chapterSel = el("chapterSelect");
 
-    clearSelect(subjectSel);
-    clearSelect(bookSel);
-    clearSelect(chapterSel);
+  clearSelect(subjectSel);
+  clearSelect(bookSel);
+  clearSelect(chapterSel);
 
-    setDisabled(subjectSel);
-    setDisabled(bookSel);
-    setDisabled(chapterSel);
+  setDisabled(subjectSel);
+  setDisabled(bookSel);
+  setDisabled(chapterSel);
 
-    if (!classVal) {
-      showStatus("Select a class");
-      return;
-    }
+  if (!classVal) return;
 
-    CURRENT_CURRICULUM = await loadCurriculumForClass(classVal);
+  CURRENT_CURRICULUM = await loadCurriculumForClass(classVal);
 
-    const subjects = getSubjectKeys(CURRENT_CURRICULUM);
-    fillSelect(subjectSel, subjects, "-- Select Subject --");
-    setDisabled(subjectSel, false);
+  const subjects = getSubjectKeys(CURRENT_CURRICULUM);
+  fillSelect(subjectSel, subjects, "-- Select Subject --");
+  setDisabled(subjectSel, false);
 
-  } catch (err) {
-    showStatus("❌ " + err.message);
-  }
+  el("bulkGenerateBtn").disabled = false;
 }
 
 function onSubjectChange() {
-  try {
-    const subjectVal = el("subjectSelect").value;
-    const bookSel = el("bookSelect");
-    const chapterSel = el("chapterSelect");
-    const bookContainer = el("bookContainer");
+  const subjectVal = el("subjectSelect").value;
+  const bookContainer = el("bookContainer");
+  const chapterSel = el("chapterSelect");
+  const bookSel = el("bookSelect");
 
-    clearSelect(bookSel);
-    clearSelect(chapterSel);
+  clearSelect(bookSel);
+  clearSelect(chapterSel);
 
-    setDisabled(bookSel);
-    setDisabled(chapterSel);
+  if (!subjectVal) return;
 
-    if (!subjectVal) {
-      CURRENT_REQUIRES_BOOK = false;
-      bookContainer.classList.add("hidden");
-      return;
-    }
+  const isSimple = Array.isArray(CURRENT_CURRICULUM[subjectVal]);
+  CURRENT_REQUIRES_BOOK = !isSimple;
 
-    const subjNode = CURRENT_CURRICULUM?.[subjectVal];
-
-    if (Array.isArray(subjNode)) {
-      CURRENT_REQUIRES_BOOK = false;
-      bookContainer.classList.add("hidden");
-
-      fillSelect(
-        chapterSel,
-        subjNode.map(c => c.chapter_title),
-        "-- Select Chapter --"
-      );
-      setDisabled(chapterSel, false);
-      return;
-    }
-
-    CURRENT_REQUIRES_BOOK = true;
+  if (isSimple) {
+    bookContainer.classList.add("hidden");
+    const ch = CURRENT_CURRICULUM[subjectVal];
+    fillSelect(chapterSel, ch.map(c => c.chapter_title), "-- Select Chapter --");
+    setDisabled(chapterSel, false);
+  } else {
     bookContainer.classList.remove("hidden");
-
     const books = getBooksForSubject(CURRENT_CURRICULUM, subjectVal);
     fillSelect(bookSel, books, "-- Select Book --");
     setDisabled(bookSel, false);
-
-  } catch (err) {
-    showStatus("❌ " + err.message);
   }
+
+  el("bulkGenerateBtn").disabled = false;
 }
 
 function onBookChange() {
@@ -212,31 +162,23 @@ function onBookChange() {
   const chapterSel = el("chapterSelect");
 
   clearSelect(chapterSel);
-  setDisabled(chapterSel);
+  if (!bookVal) return;
 
-  if (!CURRENT_REQUIRES_BOOK) return;
-
-  const chapters = getChaptersForBook(CURRENT_CURRICULUM, subjectVal, bookVal);
-
-  fillSelect(
-    chapterSel,
-    chapters.map(c => c.chapter_title),
-    "-- Select Chapter --"
-  );
+  const chapters = getChapters(CURRENT_CURRICULUM, subjectVal, bookVal);
+  fillSelect(chapterSel, chapters.map(c => c.chapter_title), "-- Select Chapter --");
   setDisabled(chapterSel, false);
+
+  el("bulkGenerateBtn").disabled = false;
 }
 
 function onChapterChange() {
-  const hasChapter = el("chapterSelect").value.trim() !== "";
-  el("generateBtn").disabled = !hasChapter;
-  el("refreshBtn").disabled = !hasChapter;
+  el("generateBtn").disabled = !el("chapterSelect").value;
+  el("refreshBtn").disabled = !el("chapterSelect").value;
 }
 
-
-// ======================================================================================================
-// SINGLE AUTOMATION — FIXED META + RETRIES
-// ======================================================================================================
-
+// ---------------------------------------------------------
+// SINGLE AUTOMATION (SAFE META)
+// ---------------------------------------------------------
 export async function runAutomation() {
   try {
     const classVal = el("classSelect").value;
@@ -246,143 +188,115 @@ export async function runAutomation() {
 
     const meta = buildCleanMeta(classVal, subjectVal, bookVal, chapterVal);
 
-    showStatus(`🚀 Starting automation for: ${chapterVal}`);
+    showStatus(`🚀 Generating: ${chapterVal}`);
 
-    // CALL GEMINI
-    const geminiRes = await postJSON("/api/gemini", { meta });
-    const questions = geminiRes.questions || [];
+    const gemini = await postJSON("/api/gemini", { meta });
+    const questions = gemini.questions || [];
 
-    showStatus(`✔ Gemini produced ${questions.length} questions`);
-
-    // SEND TO SUPABASE
-    const manageRes = await postJSON("/api/manageSupabase", {
+    const sup = await postJSON("/api/manageSupabase", {
       meta,
       csv: questions
     });
 
-    showStatus(`📦 Supabase table → ${manageRes.new_table_id}`);
-    if (manageRes.message) showStatus(manageRes.message);
-
-    alert("✔ Completed!");
-
+    showStatus(`📦 Updated → ${sup.new_table_id}`);
+    alert("✔ Completed");
   } catch (err) {
     showStatus("❌ " + err.message);
-    alert("Failed: " + err.message);
+    alert(err.message);
   }
 }
 
-
-// ======================================================================================================
-// BULK AUTOMATION — FIXED + STATUS TABLE + PROGRESS BAR + META CLEAN
-// ======================================================================================================
-
+// ---------------------------------------------------------
+// BULK AUTOMATION (META SAFE + UNIQUE CHAPTERS)
+// ---------------------------------------------------------
 export async function runBulkAutomation() {
   try {
     const classVal = el("classSelect").value;
     const subjectVal = el("subjectSelect").value;
-    const bookVal = CURRENT_REQUIRES_BOOK ? el("bookSelect").value : "";
+    const bookVal = el("bookSelect").value;
 
-    let chapters = [];
+    let ch = CURRENT_REQUIRES_BOOK
+      ? getChapters(CURRENT_CURRICULUM, subjectVal, bookVal)
+      : CURRENT_CURRICULUM[subjectVal];
 
-    if (CURRENT_REQUIRES_BOOK) {
-      chapters = CURRENT_CURRICULUM?.[subjectVal]?.[bookVal] || [];
-    } else {
-      chapters = CURRENT_CURRICULUM?.[subjectVal] || [];
-    }
-
-    if (!chapters.length) {
-      alert("No chapters found");
-      return;
-    }
+    ch = getUniqueChapters(ch);
+    if (!ch.length) return alert("No chapters found.");
 
     const tbody = el("bulkStatusTbody");
     tbody.innerHTML = "";
 
-    const progressBar = el("bulkProgressBarInner");
-    const progressLabel = el("bulkProgressLabel");
-    const progressContainer = el("bulkProgressContainer");
+    const bar = el("bulkProgressBarInner");
+    const label = el("bulkProgressLabel");
+    const container = el("bulkProgressContainer");
 
-    progressContainer.classList.remove("hidden");
+    container.classList.remove("hidden");
 
-    let completed = 0;
-    const total = chapters.length;
+    let done = 0;
+    const total = ch.length;
 
-    const updateProgress = () => {
-      const pct = Math.floor((completed / total) * 100);
-      progressBar.style.width = pct + "%";
-      progressLabel.textContent = `${completed} / ${total}`;
+    const updateBar = () => {
+      bar.style.width = `${Math.floor((done / total) * 100)}%`;
+      label.textContent = `${done} / ${total}`;
     };
 
-    updateProgress();
+    updateBar();
 
-    for (let i = 0; i < total; i++) {
-      const chapterObj = chapters[i];
-      const chapterVal = chapterObj.chapter_title;
-
+    for (let i = 0; i < ch.length; i++) {
+      const ct = ch[i].chapter_title;
       const row = document.createElement("tr");
+
       row.innerHTML = `
-        <td class="border px-2 py-1">${chapterVal}</td>
-        <td class="border px-2 py-1" id="status-${i}">⏳ Generating...</td>
-        <td class="border px-2 py-1" id="table-${i}">—</td>
+        <td class="border px-2 py-1">${ct}</td>
+        <td class="border px-2 py-1" id="st-${i}">⏳ Generating…</td>
+        <td class="border px-2 py-1" id="tb-${i}">—</td>
       `;
+
       tbody.appendChild(row);
 
-      const statusCell = el(`status-${i}`);
-      const tableCell = el(`table-${i}`);
+      const st = el(`st-${i}`);
+      const tb = el(`tb-${i}`);
 
       try {
-        statusCell.textContent = "🧠 Generating Questions…";
+        const meta = buildCleanMeta(classVal, subjectVal, bookVal, ct);
 
-        const meta = buildCleanMeta(classVal, subjectVal, bookVal, chapterVal);
+        const gemini = await postJSON("/api/gemini", { meta });
+        const questions = gemini.questions || [];
 
-        const geminiRes = await postJSON("/api/gemini", { meta });
-        const questions = geminiRes.questions || [];
+        st.textContent = `✔ ${questions.length} questions`;
 
-        statusCell.textContent = `✔ ${questions.length} questions`;
-
-        const manageRes = await postJSON("/api/manageSupabase", {
+        const sup = await postJSON("/api/manageSupabase", {
           meta,
           csv: questions
         });
 
-        tableCell.textContent = manageRes.new_table_id;
-        statusCell.textContent = "🎉 Completed";
-
+        tb.textContent = sup.new_table_id;
+        st.textContent = "🎉 Completed";
       } catch (err) {
-        statusCell.textContent = "❌ Failed";
-        showStatus("❌ Bulk error: " + err.message);
+        st.textContent = "❌ Failed";
       }
 
-      completed++;
-      updateProgress();
+      done++;
+      updateBar();
     }
 
-    alert("🎉 Bulk Generation Completed!");
+    alert("🎉 Bulk Completed");
 
   } catch (err) {
-    showStatus("❌ BULK ERROR: " + err.message);
-    alert("Bulk failed: " + err.message);
+    showStatus("❌ Bulk Error: " + err.message);
   }
 }
 
-
-// ======================================================================================================
+// ---------------------------------------------------------
 // INIT
-// ======================================================================================================
-
+// ---------------------------------------------------------
 document.addEventListener("DOMContentLoaded", () => {
-  const cs = el("classSelect");
-  const ss = el("subjectSelect");
-  const bs = el("bookSelect");
-  const chs = el("chapterSelect");
-
-  cs.addEventListener("change", onClassChange);
-  ss.addEventListener("change", onSubjectChange);
-  bs.addEventListener("change", onBookChange);
-  chs.addEventListener("change", onChapterChange);
+  el("classSelect").addEventListener("change", onClassChange);
+  el("subjectSelect").addEventListener("change", onSubjectChange);
+  el("bookSelect").addEventListener("change", onBookChange);
+  el("chapterSelect").addEventListener("change", onChapterChange);
 
   el("generateBtn").addEventListener("click", runAutomation);
   el("bulkGenerateBtn").addEventListener("click", runBulkAutomation);
 
-  showStatus("Ready4Exam Automation Initialized");
+  showStatus("Ready4Exam Automation Ready");
 });
