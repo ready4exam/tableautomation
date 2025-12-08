@@ -1,5 +1,5 @@
 // ============================================================================
-// gemini_frontend.js — FINAL FIXED VERSION (Meta Safe + Bulk Safe)
+// gemini_frontend.js — Parallel Batches + Detailed Logs
 // ============================================================================
 
 const API_BASE = "https://ready4exam-master-automation.vercel.app";
@@ -188,26 +188,38 @@ export async function runAutomation() {
 
     const meta = buildCleanMeta(classVal, subjectVal, bookVal, chapterVal);
 
-    showStatus(`🚀 Generating: ${chapterVal}`);
+    showStatus(`🚀 [Single] Generating: Class ${classVal} | ${subjectVal} | ${chapterVal}`);
 
     const gemini = await postJSON("/api/gemini", { meta });
     const questions = gemini.questions || [];
+
+    showStatus(
+      `✅ [Single] Engine: ${gemini.engine || "unknown"}, Attempts: ${
+        gemini.geminiAttempts ?? "-"
+      }, Q: ${gemini.count}, Time: ${gemini.durationMs || "-"} ms`
+    );
 
     const sup = await postJSON("/api/manageSupabase", {
       meta,
       csv: questions
     });
 
-    showStatus(`📦 Updated → ${sup.new_table_id}`);
-    alert("✔ Completed");
+    const tableName = sup.table_name || sup.new_table_id || "unknown_table";
+
+    showStatus(
+      `📦 [Single] Supabase updated → ${tableName} (rows: ${
+        sup.inserted ?? questions.length
+      })`
+    );
+    alert("✔ Single chapter completed");
   } catch (err) {
-    showStatus("❌ " + err.message);
+    showStatus("❌ [Single] " + err.message);
     alert(err.message);
   }
 }
 
 // ---------------------------------------------------------
-// BULK AUTOMATION (META SAFE + UNIQUE CHAPTERS)
+// BULK AUTOMATION (Parallel batches of 3 + logs)
 // ---------------------------------------------------------
 export async function runBulkAutomation() {
   try {
@@ -222,6 +234,11 @@ export async function runBulkAutomation() {
     ch = getUniqueChapters(ch);
     if (!ch.length) return alert("No chapters found.");
 
+    const total = ch.length;
+    showStatus(
+      `🚀 [Bulk] Starting: Class ${classVal} | Subject ${subjectVal} | Chapters: ${total}`
+    );
+
     const tbody = el("bulkStatusTbody");
     tbody.innerHTML = "";
 
@@ -232,7 +249,6 @@ export async function runBulkAutomation() {
     container.classList.remove("hidden");
 
     let done = 0;
-    const total = ch.length;
 
     const updateBar = () => {
       bar.style.width = `${Math.floor((done / total) * 100)}%`;
@@ -241,48 +257,85 @@ export async function runBulkAutomation() {
 
     updateBar();
 
+    // 1️⃣ Build all rows first
     for (let i = 0; i < ch.length; i++) {
       const ct = ch[i].chapter_title;
       const row = document.createElement("tr");
 
       row.innerHTML = `
         <td class="border px-2 py-1">${ct}</td>
-        <td class="border px-2 py-1" id="st-${i}">⏳ Generating…</td>
+        <td class="border px-2 py-1" id="st-${i}">⏳ Waiting…</td>
         <td class="border px-2 py-1" id="tb-${i}">—</td>
       `;
 
       tbody.appendChild(row);
-
-      const st = el(`st-${i}`);
-      const tb = el(`tb-${i}`);
-
-      try {
-        const meta = buildCleanMeta(classVal, subjectVal, bookVal, ct);
-
-        const gemini = await postJSON("/api/gemini", { meta });
-        const questions = gemini.questions || [];
-
-        st.textContent = `✔ ${questions.length} questions`;
-
-        const sup = await postJSON("/api/manageSupabase", {
-          meta,
-          csv: questions
-        });
-
-        tb.textContent = sup.new_table_id;
-        st.textContent = "🎉 Completed";
-      } catch (err) {
-        st.textContent = "❌ Failed";
-      }
-
-      done++;
-      updateBar();
     }
 
+    const BATCH_SIZE = 3;
+
+    for (let start = 0; start < ch.length; start += BATCH_SIZE) {
+      const batchIndices = [];
+      for (let i = start; i < Math.min(start + BATCH_SIZE, ch.length); i++) {
+        batchIndices.push(i);
+      }
+
+      await Promise.all(
+        batchIndices.map(async (i) => {
+          const ct = ch[i].chapter_title;
+          const st = el(`st-${i}`);
+          const tb = el(`tb-${i}`);
+
+          try {
+            st.textContent = "⏳ Generating…";
+            showStatus(
+              `🚀 [Bulk] Start chapter ${i + 1}/${total}: ${ct}`
+            );
+
+            const meta = buildCleanMeta(classVal, subjectVal, bookVal, ct);
+
+            const gemini = await postJSON("/api/gemini", { meta });
+            const questions = gemini.questions || [];
+
+            showStatus(
+              `✅ [Bulk] ${ct} → Engine: ${gemini.engine || "unknown"}, Attempts: ${
+                gemini.geminiAttempts ?? "-"
+              }, Q: ${gemini.count}, Time: ${gemini.durationMs || "-"} ms`
+            );
+
+            st.textContent = `✔ ${questions.length} questions`;
+
+            const sup = await postJSON("/api/manageSupabase", {
+              meta,
+              csv: questions
+            });
+
+            const tableName = sup.table_name || sup.new_table_id || "unknown_table";
+
+            tb.textContent = tableName;
+            st.textContent = "🎉 Completed";
+
+            showStatus(
+              `📦 [Bulk] ${ct} → Supabase table: ${tableName} (rows: ${
+                sup.inserted ?? questions.length
+              })`
+            );
+          } catch (err) {
+            console.error("❌ Bulk error per chapter:", err);
+            st.textContent = "❌ Failed";
+            showStatus(`❌ [Bulk] ${ct} → ${err.message}`);
+          } finally {
+            done++;
+            updateBar();
+          }
+        })
+      );
+    }
+
+    showStatus("🎉 [Bulk] Completed all chapters");
     alert("🎉 Bulk Completed");
 
   } catch (err) {
-    showStatus("❌ Bulk Error: " + err.message);
+    showStatus("❌ [Bulk Error] " + err.message);
   }
 }
 
@@ -298,5 +351,5 @@ document.addEventListener("DOMContentLoaded", () => {
   el("generateBtn").addEventListener("click", runAutomation);
   el("bulkGenerateBtn").addEventListener("click", runBulkAutomation);
 
-  showStatus("Ready4Exam Automation Ready");
+  showStatus("Ready4Exam Automation Ready (Parallel Batch Mode: 3)");
 });
