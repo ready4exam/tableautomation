@@ -1,5 +1,5 @@
 // ============================================================================
-// gemini_frontend.js — Parallel Batches + Detailed Logs
+// gemini_frontend.js — Parallel Batches + Detailed Logs (Final Corrected)
 // ============================================================================
 
 const API_BASE = "https://ready4exam-master-automation.vercel.app";
@@ -49,13 +49,21 @@ async function postJSON(path, data) {
 }
 
 // ---------------------------------------------------------
-// ALWAYS SAFE META
+// CLASS / BOOK LOGIC
 // ---------------------------------------------------------
+// Only class 11 & 12 use books (Physics Part I / Part II etc.)
+function classRequiresBook(classNum) {
+  return Number(classNum) >= 11;
+}
+
+// ALWAYS SAFE META (enforces book = "" for 5–10)
 function buildCleanMeta(classVal, subjectVal, bookVal, chapterVal) {
+  const needsBook = classRequiresBook(classVal);
+
   return {
     class_name: classVal || "",
     subject: subjectVal || "",
-    book: CURRENT_REQUIRES_BOOK ? (bookVal || "") : "",
+    book: needsBook ? (bookVal || "") : "",
     chapter: chapterVal || ""
   };
 }
@@ -89,14 +97,33 @@ function getUniqueChapters(list) {
 }
 
 function getSubjectKeys(c) { return Object.keys(c).sort(); }
+
 function getBooksForSubject(c, s) {
   if (!c[s] || Array.isArray(c[s])) return [];
   return Object.keys(c[s]).sort();
 }
+
 function getChapters(c, subject, book) {
   if (!c[subject]) return [];
   if (Array.isArray(c[subject])) return c[subject];
-  return c[subject][book] || [];
+  if (book && c[subject][book]) return c[subject][book];
+  return [];
+}
+
+// Merge all chapter arrays for a subject (Science → Physics+Chem+Bio)
+function getAllChaptersForSubjectAllGroups(curriculum, subject) {
+  const node = curriculum[subject];
+  if (!node) return [];
+
+  // If already flat array
+  if (Array.isArray(node)) return node;
+
+  // Object: merge all arrays (Physics, Chemistry, Biology, etc.)
+  const all = [];
+  Object.values(node).forEach(arr => {
+    if (Array.isArray(arr)) all.push(...arr);
+  });
+  return all;
 }
 
 // ---------------------------------------------------------
@@ -132,31 +159,41 @@ function onSubjectChange() {
   const bookContainer = el("bookContainer");
   const chapterSel = el("chapterSelect");
   const bookSel = el("bookSelect");
+  const classVal = el("classSelect").value;
 
   clearSelect(bookSel);
   clearSelect(chapterSel);
 
   if (!subjectVal) return;
 
-  const isSimple = Array.isArray(CURRENT_CURRICULUM[subjectVal]);
-  CURRENT_REQUIRES_BOOK = !isSimple;
-
-  if (isSimple) {
-    bookContainer.classList.add("hidden");
-    const ch = CURRENT_CURRICULUM[subjectVal];
-    fillSelect(chapterSel, ch.map(c => c.chapter_title), "-- Select Chapter --");
-    setDisabled(chapterSel, false);
-  } else {
+  // Only class 11–12 have books (Physics Part I / II etc.)
+  if (classRequiresBook(classVal)) {
+    CURRENT_REQUIRES_BOOK = true;
     bookContainer.classList.remove("hidden");
+
     const books = getBooksForSubject(CURRENT_CURRICULUM, subjectVal);
     fillSelect(bookSel, books, "-- Select Book --");
     setDisabled(bookSel, false);
+    return;
   }
+
+  // Classes 5–10 → NO books, merge groups (Physics/Chemistry/Biology)
+  CURRENT_REQUIRES_BOOK = false;
+  bookContainer.classList.add("hidden");
+
+  const chapters = getAllChaptersForSubjectAllGroups(CURRENT_CURRICULUM, subjectVal);
+  fillSelect(chapterSel, chapters.map(c => c.chapter_title), "-- Select Chapter --");
+  setDisabled(chapterSel, false);
 
   el("bulkGenerateBtn").disabled = false;
 }
 
 function onBookChange() {
+  const classVal = el("classSelect").value;
+
+  // Ignore book changes for classes 5–10
+  if (!classRequiresBook(classVal)) return;
+
   const subjectVal = el("subjectSelect").value;
   const bookVal = el("bookSelect").value;
   const chapterSel = el("chapterSelect");
@@ -227,14 +264,27 @@ export async function runBulkAutomation() {
     const subjectVal = el("subjectSelect").value;
     const bookVal = el("bookSelect").value;
 
-    let ch = CURRENT_REQUIRES_BOOK
-      ? getChapters(CURRENT_CURRICULUM, subjectVal, bookVal)
-      : CURRENT_CURRICULUM[subjectVal];
+    if (!classVal || !subjectVal) {
+      return alert("Please select Class and Subject first.");
+    }
 
-    ch = getUniqueChapters(ch);
-    if (!ch.length) return alert("No chapters found.");
+    const needsBook = classRequiresBook(classVal);
 
-    const total = ch.length;
+    let chapterList = [];
+
+    if (needsBook) {
+      // Class 11–12 → use selected book
+      if (!bookVal) return alert("Please select a Book.");
+      chapterList = getChapters(CURRENT_CURRICULUM, subjectVal, bookVal);
+    } else {
+      // Class 5–10 → merge Physics/Chemistry/Biology groups
+      chapterList = getAllChaptersForSubjectAllGroups(CURRENT_CURRICULUM, subjectVal);
+    }
+
+    chapterList = getUniqueChapters(chapterList);
+    if (!chapterList.length) return alert("No chapters found.");
+
+    const total = chapterList.length;
     showStatus(
       `🚀 [Bulk] Starting: Class ${classVal} | Subject ${subjectVal} | Chapters: ${total}`
     );
@@ -257,8 +307,9 @@ export async function runBulkAutomation() {
 
     updateBar();
 
-    for (let i = 0; i < ch.length; i++) {
-      const ct = ch[i].chapter_title;
+    // Build table rows first
+    for (let i = 0; i < chapterList.length; i++) {
+      const ct = chapterList[i].chapter_title;
       const row = document.createElement("tr");
 
       row.innerHTML = `
@@ -272,15 +323,15 @@ export async function runBulkAutomation() {
 
     const BATCH_SIZE = 3;
 
-    for (let start = 0; start < ch.length; start += BATCH_SIZE) {
+    for (let start = 0; start < chapterList.length; start += BATCH_SIZE) {
       const batchIndices = [];
-      for (let i = start; i < Math.min(start + BATCH_SIZE, ch.length); i++) {
+      for (let i = start; i < Math.min(start + BATCH_SIZE, chapterList.length); i++) {
         batchIndices.push(i);
       }
 
       await Promise.all(
         batchIndices.map(async (i) => {
-          const ct = ch[i].chapter_title;
+          const ct = chapterList[i].chapter_title;
           const st = el(`st-${i}`);
           const tb = el(`tb-${i}`);
 
@@ -288,7 +339,13 @@ export async function runBulkAutomation() {
             st.textContent = "⏳ Generating…";
             showStatus(`🚀 [Bulk] Start chapter ${i + 1}/${total}: ${ct}`);
 
-            const meta = buildCleanMeta(classVal, subjectVal, bookVal, ct);
+            // Build fresh meta per chapter
+            const meta = buildCleanMeta(
+              classVal,
+              subjectVal,
+              bookVal,
+              ct
+            );
 
             const gemini = await postJSON("/api/gemini", { meta });
             const questions = gemini.questions || [];
@@ -317,6 +374,7 @@ export async function runBulkAutomation() {
               })`
             );
           } catch (err) {
+            console.error("❌ Bulk error per chapter:", err);
             st.textContent = "❌ Failed";
             showStatus(`❌ [Bulk] ${ct} → ${err.message}`);
           } finally {
