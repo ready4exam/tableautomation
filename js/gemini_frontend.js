@@ -1,11 +1,10 @@
 // ============================================================================
-// gemini_frontend.js — Fully Restored Curriculum Logic + Bulk Generation
+// gemini_frontend.js — Restored Subdivisions + No Group in Backend Meta
 // ============================================================================
 
 const API_BASE = "https://ready4exam-master-automation.vercel.app";
 
 let CURRENT_CURRICULUM = null;
-let CURRENT_REQUIRES_BOOK = false;
 
 // ---------------------------------------------------------
 // BASIC HELPERS
@@ -53,23 +52,23 @@ async function postJSON(path, data) {
 // CLASS / BOOK LOGIC
 // ---------------------------------------------------------
 function classRequiresBook(classNum) {
-  return Number(classNum) >= 11;  // Only 11–12 have textbooks like Part I / II
+  return Number(classNum) >= 11;  // Only 11–12 have Part I / Part II
 }
 
+// ❗ Backend receives NO GROUP FIELD
 function buildCleanMeta(classVal, subjectVal, groupOrBookVal, chapterVal) {
   const needsBook = classRequiresBook(classVal);
 
   return {
     class_name: classVal || "",
     subject: subjectVal || "",
-    book: needsBook ? (groupOrBookVal || "") : "",  // Books only in class 11–12
-    group: !needsBook ? (groupOrBookVal || "") : "", // Groups only for class 5–10
+    book: needsBook ? (groupOrBookVal || "") : "", // Only books for class 11–12
     chapter: chapterVal || ""
   };
 }
 
 // ---------------------------------------------------------
-// CURRICULUM LOADING
+// LOAD CURRICULUM
 // ---------------------------------------------------------
 async function loadCurriculumForClass(classNum) {
   const repo = `ready4exam-class-${classNum}`;
@@ -122,7 +121,7 @@ function getUniqueChapters(list) {
 }
 
 // ---------------------------------------------------------
-// DROPDOWN EVENTS
+// DROPDOWN HANDLERS
 // ---------------------------------------------------------
 async function onClassChange() {
   const classVal = el("classSelect").value;
@@ -153,8 +152,8 @@ function onSubjectChange() {
 
   if (!subjectVal) return;
 
-  // Class 11–12 → Book-based
   if (classRequiresBook(classVal)) {
+    // Class 11–12 → Book dropdown
     const books = getGroupKeys(subjectNode);
     el("bookContainer").classList.remove("hidden");
     fillSelect(el("bookSelect"), books, "-- Select Book --");
@@ -162,16 +161,14 @@ function onSubjectChange() {
     return;
   }
 
-  // Class 5–10 → Group-based (Science, Social Science, Maths, English etc.)
+  // Class 5–10 → Subdivision dropdown
   const groups = getGroupKeys(subjectNode);
 
   if (groups.length) {
-    // Show groups (Physics / Chemistry / Algebra / etc.)
     el("bookContainer").classList.remove("hidden");
     fillSelect(el("bookSelect"), groups, "-- Select Group --");
     setDisabled(el("bookSelect"), false);
   } else {
-    // No groups → direct chapters
     el("bookContainer").classList.add("hidden");
     const chapters = getChapters(CURRENT_CURRICULUM, subjectVal, "");
     fillSelect(el("chapterSelect"), chapters.map(c => c.chapter_title));
@@ -209,13 +206,11 @@ export async function runAutomation() {
 
     const meta = buildCleanMeta(classVal, subjectVal, groupOrBookVal, chapterVal);
 
-    showStatus(`🚀 Generating for ${chapterVal}`);
-
     const gemini = await postJSON("/api/gemini", { meta });
     const sup = await postJSON("/api/manageSupabase", { meta, csv: gemini.questions });
 
-    showStatus(`✔ Table Created: ${sup.table_name}`);
-    alert("✔ Completed");
+    showStatus(`✔ Completed: ${sup.table_name}`);
+    alert("✔ Chapter Completed");
   } catch (err) {
     showStatus("❌ " + err.message);
     alert(err.message);
@@ -245,8 +240,8 @@ export async function runBulkAutomation() {
     const total = list.length;
     let done = 0;
 
-    for (let i = 0; i < list.length; i++) {
-      const chapter = list[i].chapter_title;
+    for (const ch of list) {
+      const chapter = ch.chapter_title;
       showStatus(`🚀 Bulk: ${chapter}`);
 
       try {
