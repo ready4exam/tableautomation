@@ -1,5 +1,5 @@
 // ============================================================================
-// gemini_frontend.js — Restored Subdivisions + No Group in Backend Meta
+// gemini_frontend.js — Option 1 (Subdivision stored as BOOK for class 5–10)
 // ============================================================================
 
 const API_BASE = "https://ready4exam-master-automation.vercel.app";
@@ -52,17 +52,19 @@ async function postJSON(path, data) {
 // CLASS / BOOK LOGIC
 // ---------------------------------------------------------
 function classRequiresBook(classNum) {
-  return Number(classNum) >= 11;  // Only 11–12 have Part I / Part II
+  return Number(classNum) >= 11;  // Only 11–12
 }
 
-// ❗ Backend receives NO GROUP FIELD
+// ⭐ Option 1: ALWAYS send subdivision as 'book' for class 5–10
 function buildCleanMeta(classVal, subjectVal, groupOrBookVal, chapterVal) {
   const needsBook = classRequiresBook(classVal);
 
   return {
     class_name: classVal || "",
     subject: subjectVal || "",
-    book: needsBook ? (groupOrBookVal || "") : "", // Only books for class 11–12
+    // For class 11–12: real book
+    // For class 5–10: subdivision (Physics, Algebra, History etc.)
+    book: groupOrBookVal || "",
     chapter: chapterVal || ""
   };
 }
@@ -152,28 +154,25 @@ function onSubjectChange() {
 
   if (!subjectVal) return;
 
-  if (classRequiresBook(classVal)) {
-    // Class 11–12 → Book dropdown
-    const books = getGroupKeys(subjectNode);
+  const groupsOrBooks = getGroupKeys(subjectNode);
+
+  // Show dropdown if subdivisions exist OR class requires books
+  if (groupsOrBooks.length) {
     el("bookContainer").classList.remove("hidden");
-    fillSelect(el("bookSelect"), books, "-- Select Book --");
+    fillSelect(
+      el("bookSelect"),
+      groupsOrBooks,
+      classRequiresBook(classVal) ? "-- Select Book --" : "-- Select Subdivision --"
+    );
     setDisabled(el("bookSelect"), false);
     return;
   }
 
-  // Class 5–10 → Subdivision dropdown
-  const groups = getGroupKeys(subjectNode);
-
-  if (groups.length) {
-    el("bookContainer").classList.remove("hidden");
-    fillSelect(el("bookSelect"), groups, "-- Select Group --");
-    setDisabled(el("bookSelect"), false);
-  } else {
-    el("bookContainer").classList.add("hidden");
-    const chapters = getChapters(CURRENT_CURRICULUM, subjectVal, "");
-    fillSelect(el("chapterSelect"), chapters.map(c => c.chapter_title));
-    setDisabled(el("chapterSelect"), false);
-  }
+  // Subject with no subdivisions → directly chapters
+  el("bookContainer").classList.add("hidden");
+  const chapters = getChapters(CURRENT_CURRICULUM, subjectVal, "");
+  fillSelect(el("chapterSelect"), chapters.map(c => c.chapter_title));
+  setDisabled(el("chapterSelect"), false);
 }
 
 function onBookChange() {
@@ -228,12 +227,10 @@ export async function runBulkAutomation() {
 
     let chapters = [];
 
-    if (classRequiresBook(classVal)) {
+    if (groupVal) {
       chapters = getChapters(CURRENT_CURRICULUM, subjectVal, groupVal);
     } else {
-      chapters = groupVal
-        ? getChapters(CURRENT_CURRICULUM, subjectVal, groupVal)
-        : getAllChaptersForSubject(CURRENT_CURRICULUM, subjectVal);
+      chapters = getAllChaptersForSubject(CURRENT_CURRICULUM, subjectVal);
     }
 
     const list = getUniqueChapters(chapters);
@@ -242,12 +239,17 @@ export async function runBulkAutomation() {
 
     for (const ch of list) {
       const chapter = ch.chapter_title;
+
       showStatus(`🚀 Bulk: ${chapter}`);
 
       try {
         const meta = buildCleanMeta(classVal, subjectVal, groupVal, chapter);
         const gemini = await postJSON("/api/gemini", { meta });
-        await postJSON("/api/manageSupabase", { meta, csv: gemini.questions });
+
+        await postJSON("/api/manageSupabase", {
+          meta,
+          csv: gemini.questions
+        });
 
         done++;
         showStatus(`✔ Completed ${done}/${total}: ${chapter}`);
@@ -266,13 +268,4 @@ export async function runBulkAutomation() {
 // INIT
 // ---------------------------------------------------------
 document.addEventListener("DOMContentLoaded", () => {
-  el("classSelect").addEventListener("change", onClassChange);
-  el("subjectSelect").addEventListener("change", onSubjectChange);
-  el("bookSelect").addEventListener("change", onBookChange);
-  el("chapterSelect").addEventListener("change", onChapterChange);
-
-  el("generateBtn").addEventListener("click", runAutomation);
-  el("bulkGenerateBtn").addEventListener("click", runBulkAutomation);
-
-  showStatus("Ready4Exam Automation Loaded");
-});
+  el("classSelect").addEventListener("chang
