@@ -268,4 +268,13 @@ export async function runBulkAutomation() {
 // INIT
 // ---------------------------------------------------------
 document.addEventListener("DOMContentLoaded", () => {
-  el("classSelect").addEventListener("chang
+  el("classSelect").addEventListener("change", onClassChange);
+  el("subjectSelect").addEventListener("change", onSubjectChange);
+  el("bookSelect").addEventListener("change", onBookChange);
+  el("chapterSelect").addEventListener("change", onChapterChange);
+
+  el("generateBtn").addEventListener("click", runAutomation);
+  el("bulkGenerateBtn").addEventListener("click", runBulkAutomation);
+
+  showStatus("Ready4Exam Automation Loaded");
+});
