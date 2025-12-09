@@ -1,5 +1,5 @@
 // ============================================================================
-// gemini_frontend.js — Enhanced Logging (Option A)
+// gemini_frontend.js — FINAL VERSION (Bulletproof Bulk + Clean Logs)
 // ============================================================================
 
 const API_BASE = "https://ready4exam-master-automation.vercel.app";
@@ -11,42 +11,14 @@ let CURRENT_CURRICULUM = null;
 // ---------------------------------------------------------
 function el(id) { return document.getElementById(id); }
 
-/* -------------------------------------------------------
-   CLEAN, PROFESSIONAL LOGGING — Option A (Replaces old)
---------------------------------------------------------- */
 function appendLog(msg) {
-  const box = el("log");
-  box.value = msg + "\n" + box.value;
+  const ts = new Date().toISOString().split("T").join(" ");
+  el("log").value = `${ts} | ${msg}\n` + el("log").value;
 }
 
-function logSection(title) {
-  appendLog(`\n================ ${title} ================`);
-}
-
-function logLine(text) {
-  appendLog(`• ${text}`);
-}
-
-function showStatus(msg) {
-  appendLog(`→ ${msg}`);
-}
-
-function clearSelect(sel) { sel.innerHTML = ""; }
-
-function setDisabled(sel, val = true) {
-  sel.disabled = val;
-  val ? sel.classList.add("opacity-50") : sel.classList.remove("opacity-50");
-}
-
-function fillSelect(sel, items, placeholder = "-- Select --") {
-  clearSelect(sel);
-  sel.innerHTML = `<option value="">${placeholder}</option>`;
-  items.forEach(v => {
-    const o = document.createElement("option");
-    o.value = v;
-    o.textContent = v;
-    sel.appendChild(o);
-  });
+function log1(msg) { appendLog(`• ${msg}`); }
+function logHead(msg) {
+  appendLog(`\n================ ${msg} ================`);
 }
 
 async function postJSON(path, data) {
@@ -65,7 +37,7 @@ async function postJSON(path, data) {
 // CLASS / BOOK LOGIC
 // ---------------------------------------------------------
 function classRequiresBook(classNum) {
-  return Number(classNum) >= 11;  
+  return Number(classNum) >= 11;
 }
 
 function buildCleanMeta(classVal, subjectVal, groupOrBookVal, chapterVal) {
@@ -83,13 +55,12 @@ function buildCleanMeta(classVal, subjectVal, groupOrBookVal, chapterVal) {
 async function loadCurriculumForClass(classNum) {
   const repo = `ready4exam-class-${classNum}`;
   const url = `https://ready4exam.github.io/${repo}/js/curriculum.js?v=${Date.now()}`;
-
   const m = await import(url);
   return m.curriculum || m.default;
 }
 
 // ---------------------------------------------------------
-// CURRICULUM HELPERS
+// DROPDOWN HANDLERS
 // ---------------------------------------------------------
 function getSubjectKeys(c) { return Object.keys(c).sort(); }
 
@@ -100,8 +71,7 @@ function getGroupKeys(subjectNode) {
 function getChapters(c, subject, groupOrBook) {
   const node = c[subject];
   if (!node) return [];
-  if (Array.isArray(node)) return node;
-  return node[groupOrBook] || [];
+  return Array.isArray(node) ? node : node[groupOrBook] || [];
 }
 
 function getAllChaptersForSubject(c, subject) {
@@ -110,9 +80,7 @@ function getAllChaptersForSubject(c, subject) {
   if (Array.isArray(node)) return node;
 
   let all = [];
-  for (const arr of Object.values(node)) {
-    if (Array.isArray(arr)) all.push(...arr);
-  }
+  for (const arr of Object.values(node)) if (Array.isArray(arr)) all.push(...arr);
   return all;
 }
 
@@ -128,56 +96,40 @@ function getUniqueChapters(list) {
   return out;
 }
 
-// ---------------------------------------------------------
-// DROPDOWN HANDLERS
-// ---------------------------------------------------------
 async function onClassChange() {
   const classVal = el("classSelect").value;
-
-  clearSelect(el("subjectSelect"));
-  clearSelect(el("bookSelect"));
-  clearSelect(el("chapterSelect"));
-  setDisabled(el("subjectSelect"));
-  setDisabled(el("bookSelect"));
-  setDisabled(el("chapterSelect"));
+  clearSelects();
 
   if (!classVal) return;
 
-  logSection(`Loading Curriculum for Class ${classVal}`);
   CURRENT_CURRICULUM = await loadCurriculumForClass(classVal);
-  logLine("✔ Curriculum loaded");
 
-  fillSelect(el("subjectSelect"), getSubjectKeys(CURRENT_CURRICULUM), "-- Select Subject --");
-  setDisabled(el("subjectSelect"), false);
+  fillSelect(el("subjectSelect"), getSubjectKeys(CURRENT_CURRICULUM));
+  enable(el("subjectSelect"));
 }
 
 function onSubjectChange() {
   const classVal = el("classSelect").value;
   const subjectVal = el("subjectSelect").value;
-  const subjectNode = CURRENT_CURRICULUM[subjectVal];
 
   clearSelect(el("bookSelect"));
   clearSelect(el("chapterSelect"));
 
   if (!subjectVal) return;
 
+  const subjectNode = CURRENT_CURRICULUM[subjectVal];
   const groupsOrBooks = getGroupKeys(subjectNode);
 
   if (groupsOrBooks.length) {
     el("bookContainer").classList.remove("hidden");
-    fillSelect(
-      el("bookSelect"),
-      groupsOrBooks,
-      classRequiresBook(classVal) ? "-- Select Book --" : "-- Select Subdivision --"
-    );
-    setDisabled(el("bookSelect"), false);
-    return;
+    fillSelect(el("bookSelect"), groupsOrBooks);
+    enable(el("bookSelect"));
+  } else {
+    el("bookContainer").classList.add("hidden");
+    const chapters = getChapters(CURRENT_CURRICULUM, subjectVal, "");
+    fillSelect(el("chapterSelect"), chapters.map(c => c.chapter_title));
+    enable(el("chapterSelect"));
   }
-
-  el("bookContainer").classList.add("hidden");
-  const chapters = getChapters(CURRENT_CURRICULUM, subjectVal, "");
-  fillSelect(el("chapterSelect"), chapters.map(c => c.chapter_title));
-  setDisabled(el("chapterSelect"), false);
 }
 
 function onBookChange() {
@@ -189,13 +141,32 @@ function onBookChange() {
 
   const chapters = getChapters(CURRENT_CURRICULUM, subjectVal, groupVal);
   fillSelect(el("chapterSelect"), chapters.map(c => c.chapter_title));
-  setDisabled(el("chapterSelect"), false);
+  enable(el("chapterSelect"));
 }
 
 function onChapterChange() {
   el("generateBtn").disabled = !el("chapterSelect").value;
-  el("refreshBtn").disabled = !el("chapterSelect").value;
+  el("bulkGenerateBtn").disabled = false;
 }
+
+function clearSelects() {
+  ["subjectSelect", "bookSelect", "chapterSelect"].forEach(id => {
+    el(id).innerHTML = "";
+    el(id).disabled = true;
+  });
+}
+
+function fillSelect(sel, items) {
+  sel.innerHTML = `<option value="">-- Select --</option>`;
+  items.forEach(v => {
+    const o = document.createElement("option");
+    o.value = v;
+    o.textContent = v;
+    sel.appendChild(o);
+  });
+}
+
+function enable(sel) { sel.disabled = false; }
 
 // ---------------------------------------------------------
 // SINGLE AUTOMATION
@@ -204,38 +175,34 @@ export async function runAutomation() {
   try {
     const classVal = el("classSelect").value;
     const subjectVal = el("subjectSelect").value;
-    const groupVal = el("bookSelect").value;
+    const bookVal = el("bookSelect").value;
     const chapterVal = el("chapterSelect").value;
 
-    logSection(`🚀 Automation Started: ${chapterVal}`);
+    const meta = buildCleanMeta(classVal, subjectVal, bookVal, chapterVal);
 
-    const meta = buildCleanMeta(classVal, subjectVal, groupVal, chapterVal);
-    logLine(`Class: ${classVal}, Subject: ${subjectVal}, Book: ${groupVal}`);
-    logLine(`Chapter: ${chapterVal}`);
+    logHead(`🚀 Automation Started: ${chapterVal}`);
 
-    // 1) Gemini
-    logLine("→ Generating questions (Gemini)...");
+    // CREATE TABLE FIRST (no break)
+    const createRes = await postJSON("/api/manageSupabase", { meta, csv: [] });
+    log1(`Table ready: ${createRes.table_name}`);
+
+    // THEN call Gemini (3 retries handled in backend)
     const gemini = await postJSON("/api/gemini", { meta });
-    logLine(`✔ Gemini returned ${gemini.questions.length} questions`);
+    log1(`Gemini OK (${gemini.questions.length} questions)`);
 
-    // 2) Supabase
-    logLine("→ Updating Supabase (table + RLS + inserts + usage_logs)...");
+    // Insert rows
     const sup = await postJSON("/api/manageSupabase", { meta, csv: gemini.questions });
-    logLine(`✔ Table updated: ${sup.table_name}`);
-    logLine(`✔ Inserted: ${sup.inserted} rows`);
+    log1(`Inserted: ${sup.inserted}`);
 
-    logLine("✔ curriculum.js updated");
-
-    showStatus(`✔ Completed: ${sup.table_name}`);
     alert("✔ Chapter Completed");
   } catch (err) {
-    logLine(`❌ ERROR: ${err.message}`);
+    log1("❌ " + err.message);
     alert(err.message);
   }
 }
 
 // ---------------------------------------------------------
-// BULK AUTOMATION
+// BULK AUTOMATION (NEW BULLETPROOF VERSION)
 // ---------------------------------------------------------
 export async function runBulkAutomation() {
   try {
@@ -251,32 +218,42 @@ export async function runBulkAutomation() {
     const total = list.length;
     let done = 0;
 
-    logSection(`🔥 BULK STARTED (${total} chapters)`);
+    logHead(`🔥 BULK STARTED (${total} chapters)`);
 
     for (const ch of list) {
       const chapter = ch.chapter_title;
-      logLine(`→ Processing: ${chapter}`);
+      const meta = buildCleanMeta(classVal, subjectVal, groupVal, chapter);
+
+      logHead(`Processing: ${chapter}`);
 
       try {
-        const meta = buildCleanMeta(classVal, subjectVal, groupVal, chapter);
+        // STEP 1 — Create table FIRST
+        const createRes = await postJSON("/api/manageSupabase", { meta, csv: [] });
+        log1(`Table ready: ${createRes.table_name}`);
 
+        // STEP 2 — Call Gemini
         const gemini = await postJSON("/api/gemini", { meta });
-        logLine(`   ✔ Gemini OK (${gemini.questions.length} questions)`);
+        log1(`Gemini OK (${gemini.questions.length})`);
 
-        const sup = await postJSON("/api/manageSupabase", { meta, csv: gemini.questions });
-        logLine(`   ✔ Supabase OK: ${sup.table_name}`);
+        // STEP 3 — Insert into table
+        const sup = await postJSON("/api/manageSupabase", {
+          meta,
+          csv: gemini.questions
+        });
 
         done++;
-        logLine(`✔ Completed ${done}/${total}`);
+        log1(`✔ Completed ${done}/${total}`);
+
       } catch (err) {
-        logLine(`❌ Failed ${chapter}: ${err.message}`);
+        log1(`❌ Failed: ${err.message}`);
       }
     }
 
-    logSection("🎉 BULK COMPLETED");
-    alert("Bulk Completed!");
+    logHead("🎉 BULK COMPLETED");
+    alert("Bulk Completed");
+
   } catch (err) {
-    logLine(`❌ BULK ERROR: ${err.message}`);
+    log1("❌ Bulk Error: " + err.message);
   }
 }
 
@@ -292,5 +269,5 @@ document.addEventListener("DOMContentLoaded", () => {
   el("generateBtn").addEventListener("click", runAutomation);
   el("bulkGenerateBtn").addEventListener("click", runBulkAutomation);
 
-  logSection("Ready4Exam Automation Loaded");
+  log1("Ready4Exam Automation Loaded");
 });
