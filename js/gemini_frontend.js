@@ -167,6 +167,12 @@ function fillSelect(sel, items) {
 }
 
 function enable(sel) { sel.disabled = false; }
+function clearSelect(sel) {
+  if (!sel) return;
+  while (sel.options.length > 1) {
+    sel.remove(1);
+  }
+}
 
 // ---------------------------------------------------------
 // SINGLE AUTOMATION
