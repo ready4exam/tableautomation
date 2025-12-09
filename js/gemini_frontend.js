@@ -1,5 +1,5 @@
 // ============================================================================
-// gemini_frontend.js — Option 1 (Subdivision stored as BOOK for class 5–10)
+// gemini_frontend.js — Enhanced Logging (Option A)
 // ============================================================================
 
 const API_BASE = "https://ready4exam-master-automation.vercel.app";
@@ -11,12 +11,25 @@ let CURRENT_CURRICULUM = null;
 // ---------------------------------------------------------
 function el(id) { return document.getElementById(id); }
 
+/* -------------------------------------------------------
+   CLEAN, PROFESSIONAL LOGGING — Option A (Replaces old)
+--------------------------------------------------------- */
 function appendLog(msg) {
-  const ts = new Date().toISOString();
-  el("log").value = `${ts} - ${msg}\n` + el("log").value;
+  const box = el("log");
+  box.value = msg + "\n" + box.value;
 }
 
-function showStatus(msg) { appendLog(msg); }
+function logSection(title) {
+  appendLog(`\n================ ${title} ================`);
+}
+
+function logLine(text) {
+  appendLog(`• ${text}`);
+}
+
+function showStatus(msg) {
+  appendLog(`→ ${msg}`);
+}
 
 function clearSelect(sel) { sel.innerHTML = ""; }
 
@@ -52,18 +65,13 @@ async function postJSON(path, data) {
 // CLASS / BOOK LOGIC
 // ---------------------------------------------------------
 function classRequiresBook(classNum) {
-  return Number(classNum) >= 11;  // Only 11–12
+  return Number(classNum) >= 11;  
 }
 
-// ⭐ Option 1: ALWAYS send subdivision as 'book' for class 5–10
 function buildCleanMeta(classVal, subjectVal, groupOrBookVal, chapterVal) {
-  const needsBook = classRequiresBook(classVal);
-
   return {
     class_name: classVal || "",
     subject: subjectVal || "",
-    // For class 11–12: real book
-    // For class 5–10: subdivision (Physics, Algebra, History etc.)
     book: groupOrBookVal || "",
     chapter: chapterVal || ""
   };
@@ -92,7 +100,6 @@ function getGroupKeys(subjectNode) {
 function getChapters(c, subject, groupOrBook) {
   const node = c[subject];
   if (!node) return [];
-
   if (Array.isArray(node)) return node;
   return node[groupOrBook] || [];
 }
@@ -100,7 +107,6 @@ function getChapters(c, subject, groupOrBook) {
 function getAllChaptersForSubject(c, subject) {
   const node = c[subject];
   if (!node) return [];
-
   if (Array.isArray(node)) return node;
 
   let all = [];
@@ -131,14 +137,15 @@ async function onClassChange() {
   clearSelect(el("subjectSelect"));
   clearSelect(el("bookSelect"));
   clearSelect(el("chapterSelect"));
-
   setDisabled(el("subjectSelect"));
   setDisabled(el("bookSelect"));
   setDisabled(el("chapterSelect"));
 
   if (!classVal) return;
 
+  logSection(`Loading Curriculum for Class ${classVal}`);
   CURRENT_CURRICULUM = await loadCurriculumForClass(classVal);
+  logLine("✔ Curriculum loaded");
 
   fillSelect(el("subjectSelect"), getSubjectKeys(CURRENT_CURRICULUM), "-- Select Subject --");
   setDisabled(el("subjectSelect"), false);
@@ -156,7 +163,6 @@ function onSubjectChange() {
 
   const groupsOrBooks = getGroupKeys(subjectNode);
 
-  // Show dropdown if subdivisions exist OR class requires books
   if (groupsOrBooks.length) {
     el("bookContainer").classList.remove("hidden");
     fillSelect(
@@ -168,7 +174,6 @@ function onSubjectChange() {
     return;
   }
 
-  // Subject with no subdivisions → directly chapters
   el("bookContainer").classList.add("hidden");
   const chapters = getChapters(CURRENT_CURRICULUM, subjectVal, "");
   fillSelect(el("chapterSelect"), chapters.map(c => c.chapter_title));
@@ -184,7 +189,6 @@ function onBookChange() {
 
   const chapters = getChapters(CURRENT_CURRICULUM, subjectVal, groupVal);
   fillSelect(el("chapterSelect"), chapters.map(c => c.chapter_title));
-
   setDisabled(el("chapterSelect"), false);
 }
 
@@ -200,18 +204,32 @@ export async function runAutomation() {
   try {
     const classVal = el("classSelect").value;
     const subjectVal = el("subjectSelect").value;
-    const groupOrBookVal = el("bookSelect").value;
+    const groupVal = el("bookSelect").value;
     const chapterVal = el("chapterSelect").value;
 
-    const meta = buildCleanMeta(classVal, subjectVal, groupOrBookVal, chapterVal);
+    logSection(`🚀 Automation Started: ${chapterVal}`);
 
+    const meta = buildCleanMeta(classVal, subjectVal, groupVal, chapterVal);
+    logLine(`Class: ${classVal}, Subject: ${subjectVal}, Book: ${groupVal}`);
+    logLine(`Chapter: ${chapterVal}`);
+
+    // 1) Gemini
+    logLine("→ Generating questions (Gemini)...");
     const gemini = await postJSON("/api/gemini", { meta });
+    logLine(`✔ Gemini returned ${gemini.questions.length} questions`);
+
+    // 2) Supabase
+    logLine("→ Updating Supabase (table + RLS + inserts + usage_logs)...");
     const sup = await postJSON("/api/manageSupabase", { meta, csv: gemini.questions });
+    logLine(`✔ Table updated: ${sup.table_name}`);
+    logLine(`✔ Inserted: ${sup.inserted} rows`);
+
+    logLine("✔ curriculum.js updated");
 
     showStatus(`✔ Completed: ${sup.table_name}`);
     alert("✔ Chapter Completed");
   } catch (err) {
-    showStatus("❌ " + err.message);
+    logLine(`❌ ERROR: ${err.message}`);
     alert(err.message);
   }
 }
@@ -225,42 +243,40 @@ export async function runBulkAutomation() {
     const subjectVal = el("subjectSelect").value;
     const groupVal = el("bookSelect").value;
 
-    let chapters = [];
-
-    if (groupVal) {
-      chapters = getChapters(CURRENT_CURRICULUM, subjectVal, groupVal);
-    } else {
-      chapters = getAllChaptersForSubject(CURRENT_CURRICULUM, subjectVal);
-    }
+    let chapters = groupVal
+      ? getChapters(CURRENT_CURRICULUM, subjectVal, groupVal)
+      : getAllChaptersForSubject(CURRENT_CURRICULUM, subjectVal);
 
     const list = getUniqueChapters(chapters);
     const total = list.length;
     let done = 0;
 
+    logSection(`🔥 BULK STARTED (${total} chapters)`);
+
     for (const ch of list) {
       const chapter = ch.chapter_title;
-
-      showStatus(`🚀 Bulk: ${chapter}`);
+      logLine(`→ Processing: ${chapter}`);
 
       try {
         const meta = buildCleanMeta(classVal, subjectVal, groupVal, chapter);
-        const gemini = await postJSON("/api/gemini", { meta });
 
-        await postJSON("/api/manageSupabase", {
-          meta,
-          csv: gemini.questions
-        });
+        const gemini = await postJSON("/api/gemini", { meta });
+        logLine(`   ✔ Gemini OK (${gemini.questions.length} questions)`);
+
+        const sup = await postJSON("/api/manageSupabase", { meta, csv: gemini.questions });
+        logLine(`   ✔ Supabase OK: ${sup.table_name}`);
 
         done++;
-        showStatus(`✔ Completed ${done}/${total}: ${chapter}`);
+        logLine(`✔ Completed ${done}/${total}`);
       } catch (err) {
-        showStatus(`❌ Failed ${chapter}: ${err.message}`);
+        logLine(`❌ Failed ${chapter}: ${err.message}`);
       }
     }
 
-    alert("🎉 Bulk Completed");
+    logSection("🎉 BULK COMPLETED");
+    alert("Bulk Completed!");
   } catch (err) {
-    showStatus("❌ Bulk Error: " + err.message);
+    logLine(`❌ BULK ERROR: ${err.message}`);
   }
 }
 
@@ -276,5 +292,5 @@ document.addEventListener("DOMContentLoaded", () => {
   el("generateBtn").addEventListener("click", runAutomation);
   el("bulkGenerateBtn").addEventListener("click", runBulkAutomation);
 
-  showStatus("Ready4Exam Automation Loaded");
+  logSection("Ready4Exam Automation Loaded");
 });
