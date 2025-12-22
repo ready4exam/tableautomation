@@ -3,63 +3,56 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Ready4Exam – Universal Automation Tool</title>
+  <title>Ready4Exam – Universal Console</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
-
 <body class="bg-gray-50 font-sans min-h-screen">
-
   <header class="bg-indigo-700 text-white py-4 shadow-md">
     <div class="max-w-6xl mx-auto px-6 flex justify-between items-center">
-      <h1 class="text-xl font-bold">Ready4Exam – Universal Console</h1>
-      <span class="text-sm bg-indigo-800 px-3 py-1 rounded-full">Repo-Agnostic Loader</span>
+      <h1 class="text-xl font-bold">Ready4Exam Console</h1>
+      <span class="text-xs bg-indigo-800 px-3 py-1 rounded-full">Universal Mode</span>
     </div>
   </header>
 
   <main class="max-w-6xl mx-auto p-6 space-y-6">
-
     <section class="bg-white shadow-md rounded-xl p-6 border-l-4 border-indigo-500">
-      <h2 class="text-lg font-bold mb-4 text-indigo-700">1. Target Repository Connection</h2>
+      <h2 class="text-lg font-bold mb-4 text-indigo-700">1. Repository Connection</h2>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label class="block text-sm font-semibold mb-1">GitHub Repo Slug</label>
-          <input type="text" id="repoSlug" placeholder="ready4exam/ready4exam-class-9Telangana" 
-                 class="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-indigo-500 outline-none">
-          <p class="text-xs text-gray-500 mt-1">Format: username/repo-name</p>
+          <label class="block text-sm font-semibold mb-1">Repo Slug</label>
+          <input type="text" id="repoSlug" placeholder="ready4exam/ready4exam-class-9Telangana" class="w-full border border-gray-300 rounded-lg p-2 outline-none focus:ring-2 focus:ring-indigo-500">
         </div>
         <div class="flex items-end">
-          <button id="connectBtn" class="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 transition w-full">
-            🔗 Connect & Load Curriculum
+          <button id="connectBtn" class="w-full bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 transition">
+            🔗 Connect
           </button>
         </div>
       </div>
     </section>
 
     <section id="selectionSection" class="bg-white shadow-md rounded-xl p-6 opacity-50 pointer-events-none transition-opacity duration-300">
-      <h2 class="text-lg font-bold mb-4 text-blue-700">2. Syllabus Content</h2>
+      <h2 class="text-lg font-bold mb-4 text-blue-700">2. Syllabus</h2>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div>
           <label class="block text-sm font-semibold mb-1">Subject</label>
-          <select id="subjectSelect" class="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none"></select>
+          <select id="subjectSelect" class="w-full border border-gray-300 rounded-lg p-2"></select>
         </div>
-        
         <div id="bookContainer" class="hidden">
           <label class="block text-sm font-semibold mb-1">Book / Section</label>
-          <select id="bookSelect" class="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none"></select>
+          <select id="bookSelect" class="w-full border border-gray-300 rounded-lg p-2"></select>
         </div>
-
         <div>
           <label class="block text-sm font-semibold mb-1">Chapter</label>
-          <select id="chapterSelect" class="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none"></select>
+          <select id="chapterSelect" class="w-full border border-gray-300 rounded-lg p-2"></select>
         </div>
       </div>
 
       <div class="flex gap-4 mt-6">
-        <button id="generateBtn" class="bg-blue-700 text-white px-5 py-2 rounded-lg shadow hover:bg-blue-800 transition disabled:opacity-50">
+        <button id="generateBtn" class="bg-blue-700 text-white px-5 py-2 rounded-lg shadow hover:bg-blue-800 transition">
           🚀 Generate Chapter
         </button>
         <button id="bulkGenerateBtn" class="bg-purple-600 text-white px-5 py-2 rounded-lg shadow hover:bg-purple-700 transition">
-          📚 Bulk Generate Selection
+          📚 Bulk Generate
         </button>
       </div>
     </section>
@@ -67,46 +60,34 @@
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <section class="lg:col-span-2 bg-white shadow-md rounded-xl p-6">
         <h2 class="text-lg font-bold mb-2 text-gray-700">Status Monitor</h2>
-        
         <div id="bulkProgressContainer" class="hidden mb-4 bg-blue-50 p-3 rounded-lg border border-blue-100">
           <div class="flex justify-between items-center mb-1">
-            <span class="text-xs font-bold text-blue-700 uppercase">Processing Progress</span>
+            <span class="text-xs font-bold text-blue-700">PROGRESS</span>
             <span id="bulkProgressLabel" class="text-xs font-bold text-blue-700">0 / 0</span>
           </div>
           <div class="w-full bg-gray-200 h-2 rounded-full overflow-hidden">
-            <div id="bulkProgressBarInner" class="h-full bg-blue-600 transition-all duration-500" style="width:0%"></div>
+            <div id="bulkProgressBarInner" class="h-full bg-blue-600 transition-all duration-300" style="width:0%"></div>
           </div>
         </div>
-
-        <div class="overflow-x-auto border rounded-lg">
+        <div class="overflow-x-auto border rounded-lg h-96 overflow-y-auto">
           <table class="w-full text-left text-xs">
-            <thead class="bg-gray-100 text-gray-600 uppercase">
+            <thead class="bg-gray-100 text-gray-600 uppercase sticky top-0">
               <tr>
                 <th class="border-b p-3">Chapter</th>
-                <th class="border-b p-3">Table Slug</th>
+                <th class="border-b p-3">Slug</th>
                 <th class="border-b p-3">Status</th>
               </tr>
             </thead>
-            <tbody id="bulkStatusTbody" class="divide-y">
-               <tr><td colspan="3" class="p-8 text-center text-gray-400 italic">Enter repo slug and connect to view syllabus</td></tr>
-            </tbody>
+            <tbody id="bulkStatusTbody" class="divide-y"></tbody>
           </table>
         </div>
       </section>
-
       <section class="bg-white shadow-md rounded-xl p-6">
-        <h2 class="text-lg font-bold mb-2 text-gray-700">Operation Logs</h2>
-        <textarea id="log" readonly class="w-full h-[450px] border border-gray-300 rounded-lg p-3 text-[10px] font-mono bg-gray-900 text-green-400 leading-relaxed"></textarea>
+        <h2 class="text-lg font-bold mb-2 text-gray-700">Logs</h2>
+        <textarea id="log" readonly class="w-full h-96 border border-gray-300 rounded-lg p-3 text-[10px] font-mono bg-gray-900 text-green-400 leading-relaxed"></textarea>
       </section>
     </div>
-
   </main>
-
-  <footer class="text-center py-6 text-gray-400 text-xs">
-    Ready4Exam Universal Automation Engine &copy; 2025 | For Internal Use Only
-  </footer>
-
   <script type="module" src="./js/universal_logic.js"></script>
-
 </body>
 </html>
