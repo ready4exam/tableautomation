@@ -1,5 +1,5 @@
 // ============================================================================
-// gemini_frontend.js — FINAL VERSION (Bulletproof Bulk + Clean Logs)
+// gemini_frontend.js — UPDATED VERSION (Includes Telangana Repo)
 // ============================================================================
 
 const API_BASE = "https://ready4exam-master-automation.vercel.app";
@@ -37,7 +37,8 @@ async function postJSON(path, data) {
 // CLASS / BOOK LOGIC
 // ---------------------------------------------------------
 function classRequiresBook(classNum) {
-  return Number(classNum) >= 11;
+  // Handle both standard numbers and strings like "9Telangana"
+  return parseInt(classNum) >= 11;
 }
 
 function buildCleanMeta(classVal, subjectVal, groupOrBookVal, chapterVal) {
@@ -50,13 +51,29 @@ function buildCleanMeta(classVal, subjectVal, groupOrBookVal, chapterVal) {
 }
 
 // ---------------------------------------------------------
-// LOAD CURRICULUM
+// LOAD CURRICULUM (Updated for Telangana Repository)
 // ---------------------------------------------------------
 async function loadCurriculumForClass(classNum) {
-  const repo = `ready4exam-class-${classNum}`;
+  let repo;
+  
+  // Custom logic for the Telangana specific repository
+  if (classNum === "9Telangana") {
+    repo = `ready4exam-class-9Telangana`;
+  } else {
+    // Default naming convention for other classes (e.g., ready4exam-class-10)
+    repo = `ready4exam-class-${classNum}`;
+  }
+
   const url = `https://ready4exam.github.io/${repo}/js/curriculum.js?v=${Date.now()}`;
-  const m = await import(url);
-  return m.curriculum || m.default;
+  
+  try {
+    log1(`Loading syllabus from: ${repo}...`);
+    const m = await import(url);
+    return m.curriculum || m.default;
+  } catch (err) {
+    console.error("Loader Error:", err);
+    throw new Error(`Syllabus not found! Make sure GitHub Pages is active at: ${url}`);
+  }
 }
 
 // ---------------------------------------------------------
@@ -102,14 +119,18 @@ async function onClassChange() {
 
   if (!classVal) return;
 
-  CURRENT_CURRICULUM = await loadCurriculumForClass(classVal);
-
-  fillSelect(el("subjectSelect"), getSubjectKeys(CURRENT_CURRICULUM));
-  enable(el("subjectSelect"));
+  try {
+    CURRENT_CURRICULUM = await loadCurriculumForClass(classVal);
+    fillSelect(el("subjectSelect"), getSubjectKeys(CURRENT_CURRICULUM));
+    enable(el("subjectSelect"));
+    log1(`Syllabus for ${classVal} loaded successfully.`);
+  } catch (err) {
+    log1(`❌ ${err.message}`);
+    alert(err.message);
+  }
 }
 
 function onSubjectChange() {
-  const classVal = el("classSelect").value;
   const subjectVal = el("subjectSelect").value;
 
   clearSelect(el("bookSelect"));
@@ -151,8 +172,11 @@ function onChapterChange() {
 
 function clearSelects() {
   ["subjectSelect", "bookSelect", "chapterSelect"].forEach(id => {
-    el(id).innerHTML = "";
-    el(id).disabled = true;
+    const s = el(id);
+    if (s) {
+      s.innerHTML = "";
+      s.disabled = true;
+    }
   });
 }
 
@@ -188,15 +212,12 @@ export async function runAutomation() {
 
     logHead(`🚀 Automation Started: ${chapterVal}`);
 
-    // CREATE TABLE FIRST (no break)
     const createRes = await postJSON("/api/manageSupabase", { meta, csv: [] });
     log1(`Table ready: ${createRes.table_name}`);
 
-    // THEN call Gemini (3 retries handled in backend)
     const gemini = await postJSON("/api/gemini", { meta });
     log1(`Gemini OK (${gemini.questions.length} questions)`);
 
-    // Insert rows
     const sup = await postJSON("/api/manageSupabase", { meta, csv: gemini.questions });
     log1(`Inserted: ${sup.inserted}`);
 
@@ -208,7 +229,7 @@ export async function runAutomation() {
 }
 
 // ---------------------------------------------------------
-// BULK AUTOMATION (NEW BULLETPROOF VERSION)
+// BULK AUTOMATION
 // ---------------------------------------------------------
 export async function runBulkAutomation() {
   try {
@@ -233,15 +254,12 @@ export async function runBulkAutomation() {
       logHead(`Processing: ${chapter}`);
 
       try {
-        // STEP 1 — Create table FIRST
         const createRes = await postJSON("/api/manageSupabase", { meta, csv: [] });
         log1(`Table ready: ${createRes.table_name}`);
 
-        // STEP 2 — Call Gemini
         const gemini = await postJSON("/api/gemini", { meta });
         log1(`Gemini OK (${gemini.questions.length})`);
 
-        // STEP 3 — Insert into table
         const sup = await postJSON("/api/manageSupabase", {
           meta,
           csv: gemini.questions
