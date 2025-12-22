@@ -1,303 +1,111 @@
-// ============================================================================
-// gemini_frontend.js — FULL VERSION (Bulletproof Bulk + Telangana Support)
-// ============================================================================
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Ready4Exam – Developer Automation Tool</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
 
-const API_BASE = "https://ready4exam-master-automation.vercel.app";
+<body class="bg-gray-50 font-sans min-h-screen">
 
-let CURRENT_CURRICULUM = null;
+  <header class="bg-blue-700 text-white py-4 shadow-md">
+    <div class="max-w-6xl mx-auto px-6 flex justify-between items-center">
+      <h1 class="text-xl font-bold">Ready4Exam – Automation Console</h1>
+      <span class="text-sm opacity-80">Developer Use Only</span>
+    </div>
+  </header>
 
-// ---------------------------------------------------------
-// BASIC HELPERS
-// ---------------------------------------------------------
-function el(id) { return document.getElementById(id); }
+  <main class="max-w-4xl mx-auto p-6 space-y-6">
 
-function appendLog(msg) {
-  const ts = new Date().toISOString().split("T").join(" ");
-  const logArea = el("log");
-  if (logArea) logArea.value = `${ts} | ${msg}\n` + logArea.value;
-}
+    <section class="bg-white shadow-md rounded-xl p-6">
+      <h2 class="text-2xl font-bold mb-4 text-blue-700">Curriculum Loader</h2>
 
-function log1(msg) { appendLog(`• ${msg}`); }
-function logHead(msg) {
-  appendLog(`\n================ ${msg} ================`);
-}
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-sm font-semibold mb-1">Select Class</label>
+          <select id="classSelect" class="w-full border border-gray-300 rounded-lg p-2">
+            <option value="">-- Select Class --</option>
+            <option value="9Telangana">Class 9 (Telangana)</option>
+            <option value="5">Class 5</option>
+            <option value="6">Class 6</option>
+            <option value="7">Class 7</option>
+            <option value="8">Class 8</option>
+            <option value="9">Class 9</option>
+            <option value="10">Class 10</option>
+            <option value="11">Class 11</option>
+            <option value="12">Class 12</option>
+          </select>
+        </div>
 
-async function postJSON(path, data) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data)
-  });
+        <div>
+          <label class="block text-sm font-semibold mb-1">Select Subject</label>
+          <select id="subjectSelect" class="w-full border border-gray-300 rounded-lg p-2" disabled></select>
+        </div>
 
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error || "Request failed");
-  return json;
-}
+        <div id="bookContainer" class="hidden">
+          <label class="block text-sm font-semibold mb-1">Select Book</label>
+          <select id="bookSelect" class="w-full border border-gray-300 rounded-lg p-2"></select>
+        </div>
+      </div>
 
-// ---------------------------------------------------------
-// CLASS / BOOK LOGIC
-// ---------------------------------------------------------
-function classRequiresBook(classNum) {
-  return Number(parseInt(classNum)) >= 11;
-}
+      <div class="mt-4">
+        <label class="block text-sm font-semibold mb-1">Select Chapter</label>
+        <select id="chapterSelect" class="w-full border border-gray-300 rounded-lg p-2" disabled></select>
+      </div>
 
-function buildCleanMeta(classVal, subjectVal, groupOrBookVal, chapterVal) {
-  return {
-    class_name: classVal || "",
-    subject: subjectVal || "",
-    book: groupOrBookVal || "",
-    chapter: chapterVal || ""
-  };
-}
+      <div class="flex gap-4 mt-6">
+        <button id="generateBtn"
+          class="bg-blue-700 text-white px-5 py-2 rounded-lg shadow disabled:opacity-50"
+          disabled>
+          🚀 Generate Questions
+        </button>
 
-// ---------------------------------------------------------
-// LOAD CURRICULUM (Updated for Telangana + Standard)
-// ---------------------------------------------------------
-async function loadCurriculumForClass(classNum) {
-  let repo;
-  
-  // Custom logic for the Telangana specific repository
-  if (classNum === "9Telangana") {
-    repo = `ready4exam-class-9Telangana`;
-  } else {
-    repo = `ready4exam-class-${classNum}`;
-  }
+        <button id="bulkGenerateBtn"
+          class="bg-purple-600 text-white px-5 py-2 rounded-lg shadow">
+          📚 Bulk Generate All Chapters
+        </button>
+      </div>
 
-  const url = `https://ready4exam.github.io/${repo}/js/curriculum.js?v=${Date.now()}`;
-  
-  try {
-    log1(`Loading syllabus from repo: ${repo}`);
-    const m = await import(url);
-    return m.curriculum || m.default;
-  } catch (err) {
-    console.error("Loader Error:", err);
-    throw new Error(`Syllabus not found for ${classNum}. Ensure GitHub Pages is active.`);
-  }
-}
+      <div id="bulkProgressContainer" class="hidden mt-6">
+        <div class="text-sm font-semibold mb-1 text-gray-700">Bulk Progress</div>
+        <div class="w-full bg-gray-200 h-3 rounded">
+          <div id="bulkProgressBarInner"
+               class="h-3 rounded bg-green-500 transition-all duration-300"
+               style="width:0%">
+          </div>
+        </div>
+        <div id="bulkProgressLabel" class="text-xs mt-1 text-gray-700">0 / 0</div>
+      </div>
 
-// ---------------------------------------------------------
-// DROPDOWN HANDLERS
-// ---------------------------------------------------------
-function getSubjectKeys(c) { return Object.keys(c).sort(); }
+      <div class="mt-6">
+        <h3 class="font-bold text-gray-700 mb-2">Bulk Chapter Status</h3>
+        <table class="w-full text-left text-xs border-collapse border border-gray-300">
+          <thead class="bg-gray-100">
+            <tr>
+              <th class="border px-2 py-1">Chapter</th>
+              <th class="border px-2 py-1">Status</th>
+              <th class="border px-2 py-1">Table ID</th>
+            </tr>
+          </thead>
+          <tbody id="bulkStatusTbody"></tbody>
+        </table>
+      </div>
+    </section>
 
-function getGroupKeys(subjectNode) {
-  return Array.isArray(subjectNode) ? [] : Object.keys(subjectNode);
-}
+    <section class="bg-white shadow-md rounded-xl p-6">
+      <h2 class="text-xl font-bold mb-2 text-blue-700">Logs</h2>
+      <textarea id="log" readonly
+        class="w-full h-60 border border-gray-300 rounded-lg p-3 text-sm font-mono bg-gray-50"></textarea>
+    </section>
 
-function getChapters(c, subject, groupOrBook) {
-  const node = c[subject];
-  if (!node) return [];
-  return Array.isArray(node) ? node : node[groupOrBook] || [];
-}
+  </main>
 
-function getAllChaptersForSubject(c, subject) {
-  const node = c[subject];
-  if (!node) return [];
-  if (Array.isArray(node)) return node;
+  <footer class="text-center text-xs text-gray-500 py-4">
+    Ready4Exam Developer Tool © 2025 | For internal use only
+  </footer>
 
-  let all = [];
-  for (const arr of Object.values(node)) if (Array.isArray(arr)) all.push(...arr);
-  return all;
-}
+  <script type="module" src="./js/gemini_frontend.js"></script>
 
-function getUniqueChapters(list) {
-  const out = [];
-  const seen = new Set();
-  for (const ch of list) {
-    if (!ch?.chapter_title) continue;
-    if (seen.has(ch.chapter_title)) continue;
-    seen.add(ch.chapter_title);
-    out.push(ch);
-  }
-  return out;
-}
-
-async function onClassChange() {
-  const classVal = el("classSelect").value;
-  clearSelects();
-
-  if (!classVal) return;
-
-  try {
-    CURRENT_CURRICULUM = await loadCurriculumForClass(classVal);
-    fillSelect(el("subjectSelect"), getSubjectKeys(CURRENT_CURRICULUM));
-    enable(el("subjectSelect"));
-  } catch (err) {
-    log1("❌ " + err.message);
-    alert(err.message);
-  }
-}
-
-function onSubjectChange() {
-  const subjectVal = el("subjectSelect").value;
-  clearSelect(el("bookSelect"));
-  clearSelect(el("chapterSelect"));
-
-  if (!subjectVal) return;
-
-  const subjectNode = CURRENT_CURRICULUM[subjectVal];
-  const groupsOrBooks = getGroupKeys(subjectNode);
-
-  if (groupsOrBooks.length) {
-    el("bookContainer").classList.remove("hidden");
-    fillSelect(el("bookSelect"), groupsOrBooks);
-    enable(el("bookSelect"));
-  } else {
-    el("bookContainer").classList.add("hidden");
-    const chapters = getChapters(CURRENT_CURRICULUM, subjectVal, "");
-    fillSelect(el("chapterSelect"), chapters.map(c => c.chapter_title));
-    enable(el("chapterSelect"));
-  }
-}
-
-function onBookChange() {
-  const subjectVal = el("subjectSelect").value;
-  const groupVal = el("bookSelect").value;
-  clearSelect(el("chapterSelect"));
-  if (!groupVal) return;
-
-  const chapters = getChapters(CURRENT_CURRICULUM, subjectVal, groupVal);
-  fillSelect(el("chapterSelect"), chapters.map(c => c.chapter_title));
-  enable(el("chapterSelect"));
-}
-
-function onChapterChange() {
-  el("generateBtn").disabled = !el("chapterSelect").value;
-  el("bulkGenerateBtn").disabled = false;
-}
-
-function clearSelects() {
-  ["subjectSelect", "bookSelect", "chapterSelect"].forEach(id => {
-    const s = el(id);
-    if(s) { s.innerHTML = ""; s.disabled = true; }
-  });
-}
-
-function fillSelect(sel, items) {
-  sel.innerHTML = `<option value="">-- Select --</option>`;
-  items.forEach(v => {
-    const o = document.createElement("option");
-    o.value = v; o.textContent = v;
-    sel.appendChild(o);
-  });
-}
-
-function enable(sel) { sel.disabled = false; }
-function clearSelect(sel) {
-  if (!sel) return;
-  while (sel.options.length > 1) { sel.remove(1); }
-}
-
-// ---------------------------------------------------------
-// SINGLE AUTOMATION
-// ---------------------------------------------------------
-export async function runAutomation() {
-  try {
-    const classVal = el("classSelect").value;
-    const subjectVal = el("subjectSelect").value;
-    const bookVal = el("bookSelect").value;
-    const chapterVal = el("chapterSelect").value;
-
-    const meta = buildCleanMeta(classVal, subjectVal, bookVal, chapterVal);
-
-    logHead(`🚀 Automation Started: ${chapterVal}`);
-
-    const createRes = await postJSON("/api/manageSupabase", { meta, csv: [] });
-    log1(`Table ready: ${createRes.table_name}`);
-
-    const gemini = await postJSON("/api/gemini", { meta });
-    log1(`Gemini OK (${gemini.questions.length} questions)`);
-
-    const sup = await postJSON("/api/manageSupabase", { meta, csv: gemini.questions });
-    log1(`Inserted: ${sup.inserted}`);
-
-    alert("✔ Chapter Completed");
-  } catch (err) {
-    log1("❌ " + err.message);
-    alert(err.message);
-  }
-}
-
-// ---------------------------------------------------------
-// BULK AUTOMATION (RE-ADDED & ENHANCED)
-// ---------------------------------------------------------
-export async function runBulkAutomation() {
-  try {
-    const classVal = el("classSelect").value;
-    const subjectVal = el("subjectSelect").value;
-    const groupVal = el("bookSelect").value;
-
-    let chapters = groupVal
-      ? getChapters(CURRENT_CURRICULUM, subjectVal, groupVal)
-      : getAllChaptersForSubject(CURRENT_CURRICULUM, subjectVal);
-
-    const list = getUniqueChapters(chapters);
-    const total = list.length;
-    let done = 0;
-
-    logHead(`🔥 BULK STARTED (${total} chapters)`);
-    el("bulkProgressContainer")?.classList.remove("hidden");
-    el("bulkStatusTbody").innerHTML = ""; // Clear table
-
-    for (const ch of list) {
-      const chapter = ch.chapter_title;
-      const meta = buildCleanMeta(classVal, subjectVal, groupVal, chapter);
-      
-      // Update UI Status Row
-      const rowId = `row-${done}`;
-      el("bulkStatusTbody").insertAdjacentHTML('beforeend', `
-        <tr id="${rowId}">
-          <td class="border px-2 py-1">${chapter}</td>
-          <td class="border px-2 py-1 status-cell">⏳ Processing...</td>
-          <td class="border px-2 py-1 table-id-cell">-</td>
-        </tr>
-      `);
-
-      logHead(`Processing: ${chapter}`);
-
-      try {
-        const createRes = await postJSON("/api/manageSupabase", { meta, csv: [] });
-        const gemini = await postJSON("/api/gemini", { meta });
-        const sup = await postJSON("/api/manageSupabase", { meta, csv: gemini.questions });
-
-        done++;
-        // Update Progress
-        const pct = Math.round((done / total) * 100);
-        if(el("bulkProgressBarInner")) el("bulkProgressBarInner").style.width = `${pct}%`;
-        if(el("bulkProgressLabel")) el("bulkProgressLabel").textContent = `${done} / ${total}`;
-
-        // Update Row
-        const row = document.getElementById(rowId);
-        row.querySelector(".status-cell").textContent = "✅ Success";
-        row.querySelector(".table-id-cell").textContent = createRes.table_name;
-        
-        log1(`✔ Completed ${done}/${total}`);
-      } catch (err) {
-        log1(`❌ Failed: ${err.message}`);
-        const row = document.getElementById(rowId);
-        row.querySelector(".status-cell").textContent = "❌ Failed";
-      }
-    }
-
-    logHead("🎉 BULK COMPLETED");
-    alert("Bulk Completed");
-
-  } catch (err) {
-    log1("❌ Bulk Error: " + err.message);
-  }
-}
-
-// ---------------------------------------------------------
-// INIT
-// ---------------------------------------------------------
-document.addEventListener("DOMContentLoaded", () => {
-  el("classSelect").addEventListener("change", onClassChange);
-  el("subjectSelect").addEventListener("change", onSubjectChange);
-  el("bookSelect").addEventListener("change", onBookChange);
-  el("chapterSelect").addEventListener("change", onChapterChange);
-
-  el("generateBtn").addEventListener("click", runAutomation);
-  el("bulkGenerateBtn").addEventListener("click", runBulkAutomation);
-
-  log1("Ready4Exam Automation Loaded (Full Version)");
-});
+</body>
+</html>
