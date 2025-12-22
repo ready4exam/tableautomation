@@ -1,5 +1,5 @@
 // ============================================================================
-// gemini_frontend.js — UPDATED VERSION (Includes Telangana Repo)
+// gemini_frontend.js — FULL VERSION (Telangana Support + Bulk Progress)
 // ============================================================================
 
 const API_BASE = "https://ready4exam-master-automation.vercel.app";
@@ -37,7 +37,6 @@ async function postJSON(path, data) {
 // CLASS / BOOK LOGIC
 // ---------------------------------------------------------
 function classRequiresBook(classNum) {
-  // Handle both standard numbers and strings like "9Telangana"
   return parseInt(classNum) >= 11;
 }
 
@@ -51,29 +50,19 @@ function buildCleanMeta(classVal, subjectVal, groupOrBookVal, chapterVal) {
 }
 
 // ---------------------------------------------------------
-// LOAD CURRICULUM (Updated for Telangana Repository)
+// LOAD CURRICULUM (Telangana Update)
 // ---------------------------------------------------------
 async function loadCurriculumForClass(classNum) {
   let repo;
-  
-  // Custom logic for the Telangana specific repository
   if (classNum === "9Telangana") {
     repo = `ready4exam-class-9Telangana`;
   } else {
-    // Default naming convention for other classes (e.g., ready4exam-class-10)
     repo = `ready4exam-class-${classNum}`;
   }
-
-  const url = `https://ready4exam.github.io/${repo}/js/curriculum.js?v=${Date.now()}`;
   
-  try {
-    log1(`Loading syllabus from: ${repo}...`);
-    const m = await import(url);
-    return m.curriculum || m.default;
-  } catch (err) {
-    console.error("Loader Error:", err);
-    throw new Error(`Syllabus not found! Make sure GitHub Pages is active at: ${url}`);
-  }
+  const url = `https://ready4exam.github.io/${repo}/js/curriculum.js?v=${Date.now()}`;
+  const m = await import(url);
+  return m.curriculum || m.default;
 }
 
 // ---------------------------------------------------------
@@ -119,20 +108,15 @@ async function onClassChange() {
 
   if (!classVal) return;
 
-  try {
-    CURRENT_CURRICULUM = await loadCurriculumForClass(classVal);
-    fillSelect(el("subjectSelect"), getSubjectKeys(CURRENT_CURRICULUM));
-    enable(el("subjectSelect"));
-    log1(`Syllabus for ${classVal} loaded successfully.`);
-  } catch (err) {
-    log1(`❌ ${err.message}`);
-    alert(err.message);
-  }
+  log1(`Loading syllabus for ${classVal}...`);
+  CURRENT_CURRICULUM = await loadCurriculumForClass(classVal);
+
+  fillSelect(el("subjectSelect"), getSubjectKeys(CURRENT_CURRICULUM));
+  enable(el("subjectSelect"));
 }
 
 function onSubjectChange() {
   const subjectVal = el("subjectSelect").value;
-
   clearSelect(el("bookSelect"));
   clearSelect(el("chapterSelect"));
 
@@ -172,11 +156,8 @@ function onChapterChange() {
 
 function clearSelects() {
   ["subjectSelect", "bookSelect", "chapterSelect"].forEach(id => {
-    const s = el(id);
-    if (s) {
-      s.innerHTML = "";
-      s.disabled = true;
-    }
+    el(id).innerHTML = "";
+    el(id).disabled = true;
   });
 }
 
@@ -245,31 +226,38 @@ export async function runBulkAutomation() {
     const total = list.length;
     let done = 0;
 
+    // Reset Progress UI
+    el("bulkProgressContainer").classList.remove("hidden");
+    el("bulkStatusTbody").innerHTML = "";
+    updateProgress(0, total);
+
     logHead(`🔥 BULK STARTED (${total} chapters)`);
 
     for (const ch of list) {
       const chapter = ch.chapter_title;
       const meta = buildCleanMeta(classVal, subjectVal, groupVal, chapter);
-
+      
+      // Create Row in Status Table
+      const row = addStatusRow(chapter);
       logHead(`Processing: ${chapter}`);
 
       try {
+        updateRow(row, "Creating Table...", "...");
         const createRes = await postJSON("/api/manageSupabase", { meta, csv: [] });
-        log1(`Table ready: ${createRes.table_name}`);
-
+        
+        updateRow(row, "Calling Gemini...", createRes.table_name);
         const gemini = await postJSON("/api/gemini", { meta });
-        log1(`Gemini OK (${gemini.questions.length})`);
+        
+        updateRow(row, "Inserting Rows...", createRes.table_name);
+        await postJSON("/api/manageSupabase", { meta, csv: gemini.questions });
 
-        const sup = await postJSON("/api/manageSupabase", {
-          meta,
-          csv: gemini.questions
-        });
-
+        updateRow(row, "✅ Success", createRes.table_name, "text-green-600");
         done++;
-        log1(`✔ Completed ${done}/${total}`);
+        updateProgress(done, total);
 
       } catch (err) {
         log1(`❌ Failed: ${err.message}`);
+        updateRow(row, "❌ Failed", "Error", "text-red-600");
       }
     }
 
@@ -279,6 +267,34 @@ export async function runBulkAutomation() {
   } catch (err) {
     log1("❌ Bulk Error: " + err.message);
   }
+}
+
+// ---------------------------------------------------------
+// BULK UI HELPERS
+// ---------------------------------------------------------
+function updateProgress(done, total) {
+  const perc = Math.round((done / total) * 100);
+  el("bulkProgressBarInner").style.width = `${perc}%`;
+  el("bulkProgressLabel").textContent = `${done} / ${total} chapters`;
+}
+
+function addStatusRow(chapter) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td class="border px-2 py-1">${chapter}</td>
+    <td class="border px-2 py-1 status-cell">Pending</td>
+    <td class="border px-2 py-1 id-cell">-</td>
+  `;
+  el("bulkStatusTbody").appendChild(tr);
+  return tr;
+}
+
+function updateRow(row, status, tableId, colorClass = "") {
+  const sCell = row.querySelector(".status-cell");
+  const idCell = row.querySelector(".id-cell");
+  sCell.textContent = status;
+  idCell.textContent = tableId;
+  if (colorClass) sCell.className = `border px-2 py-1 status-cell font-bold ${colorClass}`;
 }
 
 // ---------------------------------------------------------
