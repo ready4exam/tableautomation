@@ -1,4 +1,7 @@
-// universal_logic.js
+// ============================================================================
+// universal_logic.js — REPO-AGNOSTIC LOAD & AUTOMATION
+// ============================================================================
+
 const repoInput = document.getElementById('repoSlug');
 const connectBtn = document.getElementById('connectBtn');
 const selectionSection = document.getElementById('selectionSection');
@@ -6,68 +9,98 @@ const subjectSelect = document.getElementById('subjectSelect');
 const chapterSelect = document.getElementById('chapterSelect');
 const logArea = document.getElementById('log');
 
+// Global state to hold the parsed curriculum
+let ACTIVE_CURRICULUM = null;
+
 function addLog(msg) {
     const time = new Date().toLocaleTimeString();
-    logArea.value += `[${time}] ${msg}\n`;
-    logArea.scrollTop = logArea.scrollHeight;
+    logArea.value = `[${time}] ${msg}\n` + logArea.value;
+    logArea.scrollTop = 0;
 }
 
 connectBtn.addEventListener('click', async () => {
-    const repo = repoInput.value.trim();
-    if (!repo) return alert("Please enter a repo slug (e.g., ready4exam/ready4exam-class-9Telangana)");
+    const repoSlug = repoInput.value.trim(); // e.g., ready4exam/ready4exam-class-9Telangana
+    if (!repoSlug) return alert("Please enter the full repo slug.");
 
-    addLog(`Attempting to fetch curriculum from: ${repo}...`);
+    addLog(`🔗 Connecting to: ${repoSlug}...`);
 
-    // We assume your manual curriculum.js is located at this path in every repo
-    const curriculumUrl = `https://raw.githubusercontent.com/${repo}/main/js/curriculum.js`;
+    // Fetch from Raw GitHub to bypass module restrictions
+    const curriculumUrl = `https://raw.githubusercontent.com/${repoSlug}/main/js/curriculum.js?v=${Date.now()}`;
 
     try {
         const response = await fetch(curriculumUrl);
-        if (!response.ok) throw new Error("Curriculum file not found in repo.");
+        if (!response.ok) throw new Error("Curriculum file not found. Check repo privacy and path.");
         
-        const scriptText = await response.text();
+        const text = await response.text();
         
-        // Safety check and execution
-        // This evaluates your 'window.curriculumData = { ... }' logic
-        const script = document.createElement('script');
-        script.text = scriptText;
-        document.head.appendChild(script);
+        // UNIVERSAL PARSING: Handles 'export const curriculum = { ... }' or 'window.curriculumData = { ... }'
+        const cleanJS = text
+            .replace(/export const curriculum = /, "")
+            .replace(/export default curriculum;/, "")
+            .replace(/window\.curriculumData = /, "")
+            .trim()
+            .replace(/;$/, "");
+        
+        // Convert string to actual Object
+        ACTIVE_CURRICULUM = new Function(`return ${cleanJS}`)();
 
-        setTimeout(() => {
-            if (window.curriculumData) {
-                setupSyllabus(window.curriculumData);
-                selectionSection.classList.remove('opacity-50', 'pointer-events-none');
-                addLog(`Success! Loaded ${Object.keys(window.curriculumData).length} subjects.`);
-            } else {
-                addLog("Error: window.curriculumData not found in script.", "error");
-            }
-        }, 500);
+        if (ACTIVE_CURRICULUM) {
+            setupSyllabus(ACTIVE_CURRICULUM);
+            selectionSection.classList.remove('opacity-50', 'pointer-events-none');
+            addLog(`✅ SUCCESS: Loaded ${Object.keys(ACTIVE_CURRICULUM).length} main subjects.`);
+        }
 
     } catch (err) {
-        addLog(`Connection Failed: ${err.message}`);
-        alert("Could not load curriculum. Ensure the repo is public and the path /js/curriculum.js exists.");
+        addLog(`❌ CONNECTION FAILED: ${err.message}`);
+        alert("Could not load curriculum. Ensure path is /js/curriculum.js");
     }
 });
 
 function setupSyllabus(data) {
-    subjectSelect.innerHTML = Object.keys(data).map(sub => `<option value="${sub}">${sub}</option>`).join('');
+    // Populate Subjects
+    subjectSelect.innerHTML = '<option value="">-- Select Subject --</option>' + 
+        Object.keys(data).map(sub => `<option value="${sub}">${sub}</option>`).join('');
     
-    const updateChapters = () => {
+    subjectSelect.onchange = () => {
         const sub = subjectSelect.value;
-        const chapters = data[sub];
-        chapterSelect.innerHTML = chapters.map(ch => `<option value="${ch}">${ch}</option>`).join('');
-        
-        // Update Status Table
-        const tbody = document.getElementById('bulkStatusTbody');
-        tbody.innerHTML = chapters.map(ch => `
-            <tr>
-                <td class="border p-2">${ch}</td>
-                <td class="border p-2 text-gray-500">${ch.toLowerCase().replace(/\s+/g, '-')}</td>
-                <td class="border p-2"><span class="text-orange-500">Pending</span></td>
-            </tr>
-        `).join('');
-    };
+        if (!sub) return;
 
-    subjectSelect.addEventListener('change', updateChapters);
-    updateChapters();
+        const node = data[sub];
+        let chapters = [];
+
+        // DRY RUN LOGIC: Check if it's nested (Telangana) or flat (CBSE)
+        if (Array.isArray(node)) {
+            // Flat Array (CBSE style)
+            chapters = node;
+        } else {
+            // Nested Object (Telangana/ICSE style)
+            // Flatten all sub-books into one list for the status table
+            chapters = Object.values(node).flat();
+        }
+
+        // Update Chapter Dropdown
+        chapterSelect.innerHTML = chapters.map(ch => 
+            `<option value="${ch.chapter_title}">${ch.chapter_title}</option>`
+        ).join('');
+        
+        // Update Status Table with Universal Slug logic
+        const tbody = document.getElementById('bulkStatusTbody');
+        tbody.innerHTML = chapters.map(ch => {
+            const title = ch.chapter_title;
+            // Generate slug: "Matter Around Us" -> "matter-around-us"
+            const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+            
+            return `
+                <tr class="hover:bg-gray-50">
+                    <td class="border p-2 font-medium">${title}</td>
+                    <td class="border p-2 text-gray-500 font-mono">${slug}</td>
+                    <td class="border p-2">
+                        <span class="px-2 py-1 rounded-full text-[10px] bg-orange-100 text-orange-700 font-bold uppercase">Pending</span>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+
+        addLog(`📂 Subject "${sub}" ready with ${chapters.length} chapters.`);
+    };
 }
