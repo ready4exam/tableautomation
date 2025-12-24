@@ -1,138 +1,323 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Ready4Exam – Developer Automation Tool</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-</head>
+// ============================================================================
+// /api/manageSupabase_tg.js — DEDICATED TELANGANA BACKEND
+// ============================================================================
 
-<body class="bg-gray-50 font-sans min-h-screen">
+import { createClient } from "@supabase/supabase-js";
+import { getCorsHeaders } from "./cors.js";
+import { transliterate as tr } from "transliteration";
 
-  <!-- HEADER -->
-  <header class="bg-blue-700 text-white py-4 shadow-md">
-    <div class="max-w-6xl mx-auto px-6 flex justify-between items-center">
-      <h1 class="text-xl font-bold">Ready4Exam – Automation Console</h1>
-      <span class="text-sm opacity-80">Developer Use Only</span>
-    </div>
-  </header>
+export const config = { runtime: "nodejs" };
 
-  <main class="max-w-4xl mx-auto p-6 space-y-6">
+// =====================================================================
+// HELPER: Normalizers
+// =====================================================================
+function normalizeDifficulty(d) {
+  if (!d) return "Simple";
+  d = d.toLowerCase().trim();
+  if (["simple", "easy"].includes(d)) return "Simple";
+  if (["medium", "moderate"].includes(d)) return "Medium";
+  if (["advanced", "hard"].includes(d)) return "Advanced";
+  return "Simple";
+}
 
-    <!-- ========================================================== -->
-    <!-- SECTION 1: Curriculum Loader -->
-    <!-- ========================================================== -->
-    <section class="bg-white shadow-md rounded-xl p-6">
-      <h2 class="text-2xl font-bold mb-4 text-blue-700">Curriculum Loader</h2>
+function normalizeQType(t) {
+  if (!t) return "MCQ";
+  t = t.toLowerCase().trim();
+  if (["mcq", "multiple choice", "objective"].includes(t)) return "MCQ";
+  if (["ar", "assertion", "assertion-reason"].includes(t)) return "AR";
+  if (["case", "case-based", "case study"].includes(t)) return "Case-Based";
+  return "MCQ";
+}
 
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div>
-          <label class="block text-sm font-semibold mb-1">Select Class</label>
-          <select id="classSelect" class="w-full border border-gray-300 rounded-lg p-2">
-            <option value="">-- Select Class --</option>
-            <option value="5">Class 5</option>
-            <option value="6">Class 6</option>
-            <option value="7">Class 7</option>
-            <option value="8">Class 8</option>
-            <option value="9">Class 9</option>
-            <option value="10">Class 10</option>
-            <option value="11">Class 11</option>
-            <option value="12">Class 12</option>
-          </select>
-        </div>
+const SKIP_WORDS = ["as","of","the","a","an","in","on","for","to","ki","ke","ka"];
+const norm = s => (s ?? "").toString().trim().toLowerCase();
 
-        <div>
-          <label class="block text-sm font-semibold mb-1">Select Subject</label>
-          <select id="subjectSelect" class="w-full border border-gray-300 rounded-lg p-2" disabled></select>
-        </div>
+function pushLog(logs, msg) {
+  logs.push(msg);
+  console.log(msg);
+}
 
-        <div id="bookContainer" class="hidden">
-          <label class="block text-sm font-semibold mb-1">Select Book</label>
-          <select id="bookSelect" class="w-full border border-gray-300 rounded-lg p-2"></select>
-        </div>
-      </div>
+// =====================================================================
+// ⭐ TABLE NAME BUILDER (Telangana Specific)
+// =====================================================================
+function buildTableName(meta) {
+  // Extract number from "9_telangana" -> "9"
+  let grade = meta.class_name.replace("_telangana", ""); 
+  
+  // Force suffix to "tg"
+  const suffix = `${grade}tg`; 
 
-      <div class="mt-4">
-        <label class="block text-sm font-semibold mb-1">Select Chapter</label>
-        <select id="chapterSelect" class="w-full border border-gray-300 rounded-lg p-2" disabled></select>
-      </div>
+  const rawSubject = meta.subject || "";
+  let subjectSlug = tr(rawSubject)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .trim()
+    .split(" ")[0] || "subject";
 
-      <!-- Buttons -->
-      <div class="flex gap-4 mt-6">
-        <button id="generateBtn"
-          class="bg-blue-700 text-white px-5 py-2 rounded-lg shadow disabled:opacity-50"
-          disabled>
-          🚀 Generate Questions
-        </button>
+  const chapterRaw = meta.chapter || "";
+  let chapter = tr(chapterRaw)
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .trim();
 
-        <button id="refreshBtn"
-          class="bg-yellow-400 text-black px-5 py-2 rounded-lg shadow disabled:opacity-50"
-          disabled>
-          🔄 Refresh Table
-        </button>
+  const words = chapter.split(" ").filter(Boolean);
+  const filtered = words.filter(w => !SKIP_WORDS.includes(w));
+  const first = filtered[0] || words[0] || "ch";
+  const last  = filtered[filtered.length - 1] || words[words.length - 1] || "x";
 
-        <!-- ⭐ NEW Bulk Generate Button -->
-        <button id="bulkGenerateBtn"
-          class="bg-purple-600 text-white px-5 py-2 rounded-lg shadow">
-          📚 Bulk Generate All Chapters
-        </button>
-      </div>
+  // Result example: physics_light_reflection_9tg_quiz
+  return `${subjectSlug}_${first}_${last}_${suffix}_quiz`;
+}
 
-      <!-- ========================================================== -->
-      <!-- ⭐ NEW: Bulk Progress Bar -->
-      <!-- ========================================================== -->
-      <div id="bulkProgressContainer" class="hidden mt-6">
-        <div class="text-sm font-semibold mb-1 text-gray-700">Bulk Progress</div>
+// =====================================================================
+// GITHUB HELPERS
+// =====================================================================
+async function fetchGithubFile({ owner, repo, path, token }) {
+  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
+  const resp = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" }
+  });
 
-        <div class="w-full bg-gray-200 h-3 rounded">
-          <div id="bulkProgressBarInner"
-               class="h-3 rounded bg-green-500 transition-all duration-300"
-               style="width:0%">
-          </div>
-        </div>
+  if (!resp.ok) {
+    console.error(`❌ GitHub GET failed for ${repo}/${path}:`, resp.status, await resp.text());
+    return null;
+  }
+  return await resp.json();
+}
 
-        <div id="bulkProgressLabel" class="text-xs mt-1 text-gray-700">0 / 0</div>
-      </div>
+async function updateGithubFile({ owner, repo, path, token, content, sha, message }) {
+  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
+  const resp = await fetch(url, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      message,
+      content: Buffer.from(content, "utf8").toString("base64"),
+      sha,
+      branch: "main"
+    })
+  });
 
-      <!-- ========================================================== -->
-      <!-- ⭐ NEW: Bulk Chapter Status Table -->
-      <!-- ========================================================== -->
-      <div class="mt-6">
-        <h3 class="font-bold text-gray-700 mb-2">Bulk Chapter Status</h3>
+  if (!resp.ok) {
+    console.error(`❌ GitHub PUT failed for ${repo}/${path}:`, resp.status, await resp.text());
+    return null;
+  }
+  return await resp.json();
+}
 
-        <table class="w-full text-left text-xs border-collapse border border-gray-300">
-          <thead class="bg-gray-100">
-            <tr>
-              <th class="border px-2 py-1">Chapter</th>
-              <th class="border px-2 py-1">Status</th>
-              <th class="border px-2 py-1">Table ID</th>
-            </tr>
-          </thead>
+function parseCurriculumJsToObject(text) {
+  try {
+    let clean = text
+      .replace(/export\s+default\s+curriculum\s*;?/g, "")
+      .replace(/export\s+const\s+curriculum\s*=\s*/, "")
+      .trim();
+    if (clean.endsWith(";")) clean = clean.slice(0, -1);
+    return eval(`(${clean})`);
+  } catch (e) {
+    console.error("❌ Failed to parse curriculum.js:", e);
+    return null;
+  }
+}
 
-          <tbody id="bulkStatusTbody"></tbody>
-        </table>
-      </div>
+function serializeCurriculumObjectToJs(obj) {
+  return `export const curriculum = ${JSON.stringify(obj, null, 2)};\nexport default curriculum;\n`;
+}
 
-    </section>
+// =====================================================================
+// APPLY table_id
+// =====================================================================
+function applyTableIdToCurriculum(curriculum, meta, tableName) {
+  const subjectKey   = meta.subject;
+  const chapterTitle = meta.chapter;
+  const subdivision  = meta.book || null;
 
+  if (!curriculum || !subjectKey || !curriculum[subjectKey]) {
+    console.warn("⚠ Subject not found in curriculum:", subjectKey);
+    return false;
+  }
 
-    <!-- ========================================================== -->
-    <!-- SECTION 2: Logs -->
-    <!-- ========================================================== -->
-    <section class="bg-white shadow-md rounded-xl p-6">
-      <h2 class="text-xl font-bold mb-2 text-blue-700">Logs</h2>
-      <textarea id="log" readonly
-        class="w-full h-60 border border-gray-300 rounded-lg p-3 text-sm font-mono bg-gray-50"></textarea>
-    </section>
+  let updated = false;
+  const subjectNode = curriculum[subjectKey];
+  const match = ch => norm(ch?.chapter_title) === norm(chapterTitle);
 
-  </main>
+  // Flat array
+  if (Array.isArray(subjectNode)) {
+    subjectNode.forEach(ch => {
+      if (match(ch)) { ch.table_id = tableName; updated = true; }
+    });
+    return updated;
+  }
 
-  <footer class="text-center text-xs text-gray-500 py-4">
-    Ready4Exam Developer Tool © 2025 | For internal use only
-  </footer>
+  // Nested Groups
+  const groups = subdivision ? [subdivision] : Object.keys(subjectNode);
+  groups.forEach(group => {
+    const arr = subjectNode[group];
+    if (!Array.isArray(arr)) return;
+    arr.forEach(ch => {
+      if (match(ch)) { ch.table_id = tableName; updated = true; }
+    });
+  });
 
-  <!-- module script -->
-  <script type="module" src="./js/gemini_frontend.js"></script>
+  return updated;
+}
 
-</body>
-</html>
+// =====================================================================
+// ⭐ UPDATE CURRICULUM (Telangana Repo Hardcoded)
+// =====================================================================
+async function updateCurriculumForChapter(meta, tableName, logs) {
+  const owner = process.env.GITHUB_OWNER;
+  const token = process.env.GITHUB_TOKEN;
+  
+  if (!owner || !token) {
+    pushLog(logs, "⚠ curriculum.js not updated (missing GitHub credentials)");
+    return;
+  }
+
+  // FORCE Telangana Repo
+  const repo = "ready4exam-class-9Telangana"; 
+  const path = "js/curriculum.js";
+
+  const file = await fetchGithubFile({ owner, repo, path, token });
+  if (!file?.content || !file?.sha) {
+    pushLog(logs, `⚠ curriculum.js not updated (file not found in ${repo})`);
+    return;
+  }
+
+  const original = Buffer.from(file.content, "base64").toString("utf8");
+  const obj = parseCurriculumJsToObject(original);
+  if (!obj) {
+    pushLog(logs, "⚠ curriculum.js not updated (parse failed)");
+    return;
+  }
+
+  const changed = applyTableIdToCurriculum(obj, meta, tableName);
+  if (!changed) {
+    pushLog(logs, "⚠ curriculum.js not updated (chapter not found)");
+    return;
+  }
+
+  const newText = serializeCurriculumObjectToJs(obj);
+
+  await updateGithubFile({
+    owner,
+    repo,
+    path,
+    token,
+    content: newText,
+    sha: file.sha,
+    message: `chore: update table_id for ${meta.chapter} → ${tableName}`
+  });
+
+  pushLog(logs, `✔ curriculum.js updated for "${meta.chapter}" in ${repo}`);
+}
+
+// =====================================================================
+// MAIN HANDLER
+// =====================================================================
+export default async function handler(req, res) {
+  const origin = req.headers.origin || "*";
+  Object.entries(getCorsHeaders(origin)).forEach(([k, v]) => res.setHeader(k, v));
+  res.setHeader("Access-Control-Allow-Origin", "https://ready4exam.github.io");
+
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).json({ ok:false, error:"Only POST allowed" });
+
+  const logs = [];
+
+  try {
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    const { meta, csv } = body || {};
+
+    if (!meta || !csv || !Array.isArray(csv)) {
+      return res.status(400).json({ ok:false, error:"Invalid payload" });
+    }
+
+    const { class_name, subject, chapter } = meta;
+    pushLog(logs, `📌 [TS] Starting automation for Class ${class_name} → ${subject}`);
+
+    // Use specific DB creds if needed, or default
+    const supabaseUrl = process.env.SUPABASE_URL_11; 
+    const supabaseKey = process.env.SUPABASE_SERVICE_KEY_11;
+
+    if (!supabaseUrl || !supabaseKey) throw new Error("SUPABASE Credentials missing");
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // 1. Build Table Name
+    const table = buildTableName(meta);
+    pushLog(logs, `📌 Target table: ${table}`);
+
+    // 2. Ensure Table
+    const ensure = await supabase.rpc("ensure_table_exists", { table_name: table });
+    if (ensure.error) throw ensure.error;
+    pushLog(logs, `✔ Table created/ensured`);
+
+    // 3. RLS
+    await supabase.rpc("exec_sql", {
+      sql: `
+        ALTER TABLE public.${table} ENABLE ROW LEVEL SECURITY;
+        DO $$ BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = '${table}_select_policy') THEN
+            EXECUTE 'CREATE POLICY ${table}_select_policy ON public.${table} FOR SELECT TO anon, authenticated USING (true);';
+          END IF;
+        END $$;
+        GRANT USAGE ON SCHEMA public TO anon, authenticated;
+        GRANT SELECT ON public.${table} TO anon, authenticated;
+      `
+    });
+    pushLog(logs, "✔ RLS enabled");
+
+    // 4. Clear & Insert
+    await supabase.from(table).delete().neq("id", 0);
+    
+    const rows = csv.map(r => ({
+      difficulty: normalizeDifficulty(r.difficulty),
+      question_type: normalizeQType(r.question_type),
+      question_text: (r.question_text || "").trim(),
+      scenario_reason_text: (r.scenario_reason_text || "").trim(),
+      option_a: (r.option_a || "").trim(),
+      option_b: (r.option_b || "").trim(),
+      option_c: (r.option_c || "").trim(),
+      option_d: (r.option_d || "").trim(),
+      correct_answer_key: (r.correct_answer_key || "").trim().toUpperCase()
+    }));
+
+    await supabase.from(table).insert(rows);
+    pushLog(logs, `✔ Inserted ${rows.length} questions`);
+
+    // 5. Update usage_logs
+    const lookup = await supabase.from("usage_logs").select("*").eq("table_name", table).maybeSingle();
+    if (lookup?.data) {
+      await supabase.from("usage_logs").update({
+        refresh_count: (lookup.data.refresh_count || 0) + 1,
+        inserted_count: rows.length,
+        updated_at: new Date()
+      }).eq("table_name", table);
+    } else {
+      await supabase.from("usage_logs").insert({
+        table_name: table,
+        class_name: meta.class_name,
+        subject: meta.subject,
+        book: meta.book || "",
+        chapter: meta.chapter || "",
+        inserted_count: rows.length,
+        refresh_count: 0
+      });
+    }
+    pushLog(logs, "✔ usage_logs updated");
+
+    // 6. Update Curriculum
+    await updateCurriculumForChapter(meta, table, logs);
+
+    res.status(200).json({ ok: true, table_name: table, inserted: rows.length, logs });
+
+  } catch (err) {
+    console.error("❌ manageSupabase_tg ERROR:", err);
+    pushLog(logs, `❌ ERROR: ${err.message}`);
+    res.status(500).json({ ok: false, error: err.message, logs });
+  }
+}
