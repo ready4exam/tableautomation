@@ -70,12 +70,17 @@ function updateChapterList(chapters) {
   el("bulkStatusTbody").innerHTML = chapters.map(c => `
     <tr id="row-${slugify(c.chapter_title)}">
       <td class="border p-2 font-medium">${c.chapter_title}</td>
-      <td class="border p-2 text-gray-400 font-mono">${slugify(c.chapter_title)}</td>
       <td class="border p-2 status-cell"><span class="text-orange-500 font-bold">PENDING</span></td>
+      <td class="border p-2 font-mono">${c.table_id || "PENDING"}</td>
     </tr>`).join("");
 }
 
 function slugify(t) { return t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""); }
+
+function getClassNameFromSlug(slug) {
+  const match = slug.match(/class-(.+)/);
+  return match ? match[1] : slug.split("-").pop();
+}
 
 async function runChapterProcess(meta, rowId) {
   const cell = rowId ? el(rowId).querySelector(".status-cell") : null;
@@ -109,8 +114,9 @@ async function runChapterProcess(meta, rowId) {
 }
 
 el("generateBtn").onclick = async () => {
+  const slug = el("repoSlug").value;
   const meta = {
-    class_name: el("repoSlug").value.split("-").pop(),
+    class_name: getClassNameFromSlug(slug),
     subject: el("subjectSelect").value,
     book: el("bookSelect").value || "",
     chapter: el("chapterSelect").value
@@ -120,6 +126,7 @@ el("generateBtn").onclick = async () => {
 };
 
 el("bulkGenerateBtn").onclick = async () => {
+  const slug = el("repoSlug").value;
   const sub = el("subjectSelect").value;
   const book = el("bookSelect").value;
   const chapters = book ? ACTIVE_CURRICULUM[sub][book] : ACTIVE_CURRICULUM[sub];
@@ -130,7 +137,7 @@ el("bulkGenerateBtn").onclick = async () => {
   let done = 0;
   for (const ch of chapters) {
     const meta = {
-      class_name: el("repoSlug").value.split("-").pop(),
+      class_name: getClassNameFromSlug(slug),
       subject: sub, book: book || "", chapter: ch.chapter_title
     };
     await runChapterProcess(meta, `row-${slugify(ch.chapter_title)}`);
