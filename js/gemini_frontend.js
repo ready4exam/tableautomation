@@ -1,5 +1,5 @@
 // ============================================================================
-// gemini_frontend.js — FINAL VERSION (Bulletproof Bulk + Clean Logs)
+// gemini_frontend.js — UPDATED (Routes 9_telangana to separate DB file)
 // ============================================================================
 
 const API_BASE = "https://ready4exam-master-automation.vercel.app";
@@ -34,12 +34,28 @@ async function postJSON(path, data) {
 }
 
 // ---------------------------------------------------------
-// CLASS / BOOK LOGIC
+// REPO & ENDPOINT MAPPING
 // ---------------------------------------------------------
-function classRequiresBook(classNum) {
-  return Number(classNum) >= 11;
+function getRepoName(classVal) {
+  if (classVal === "9_telangana") return "ready4exam-class-9Telangana";
+  return `ready4exam-class-${classVal}`;
 }
 
+// 1. WHICH AI ENGINE? (NCERT vs SCERT)
+function getGenAiEndpoint(classVal) {
+  if (classVal === "9_telangana") return "/api/tel_gemini";
+  return "/api/gemini";
+}
+
+// 2. WHICH DB MANAGER? (Standard vs TG)
+function getDbManagerEndpoint(classVal) {
+  if (classVal === "9_telangana") return "/api/manageSupabase_tg";
+  return "/api/manageSupabase";
+}
+
+// ---------------------------------------------------------
+// CLASS / BOOK LOGIC
+// ---------------------------------------------------------
 function buildCleanMeta(classVal, subjectVal, groupOrBookVal, chapterVal) {
   return {
     class_name: classVal || "",
@@ -49,41 +65,36 @@ function buildCleanMeta(classVal, subjectVal, groupOrBookVal, chapterVal) {
   };
 }
 
-// ---------------------------------------------------------
-// LOAD CURRICULUM
-// ---------------------------------------------------------
 async function loadCurriculumForClass(classNum) {
-  const repo = `ready4exam-class-${classNum}`;
+  const repo = getRepoName(classNum);
   const url = `https://ready4exam.github.io/${repo}/js/curriculum.js?v=${Date.now()}`;
-  const m = await import(url);
-  return m.curriculum || m.default;
+  try {
+    const m = await import(url);
+    return m.curriculum || m.default;
+  } catch (err) {
+    appendLog(`❌ Error loading curriculum for ${repo}: ${err.message}`);
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------
-// DROPDOWN HANDLERS
+// DROPDOWN HANDLERS (Standard logic)
 // ---------------------------------------------------------
 function getSubjectKeys(c) { return Object.keys(c).sort(); }
-
-function getGroupKeys(subjectNode) {
-  return Array.isArray(subjectNode) ? [] : Object.keys(subjectNode);
-}
-
+function getGroupKeys(subjectNode) { return Array.isArray(subjectNode) ? [] : Object.keys(subjectNode); }
 function getChapters(c, subject, groupOrBook) {
   const node = c[subject];
   if (!node) return [];
   return Array.isArray(node) ? node : node[groupOrBook] || [];
 }
-
 function getAllChaptersForSubject(c, subject) {
   const node = c[subject];
   if (!node) return [];
   if (Array.isArray(node)) return node;
-
   let all = [];
   for (const arr of Object.values(node)) if (Array.isArray(arr)) all.push(...arr);
   return all;
 }
-
 function getUniqueChapters(list) {
   const out = [];
   const seen = new Set();
@@ -99,27 +110,24 @@ function getUniqueChapters(list) {
 async function onClassChange() {
   const classVal = el("classSelect").value;
   clearSelects();
-
   if (!classVal) return;
-
-  CURRENT_CURRICULUM = await loadCurriculumForClass(classVal);
-
-  fillSelect(el("subjectSelect"), getSubjectKeys(CURRENT_CURRICULUM));
-  enable(el("subjectSelect"));
+  try {
+    CURRENT_CURRICULUM = await loadCurriculumForClass(classVal);
+    fillSelect(el("subjectSelect"), getSubjectKeys(CURRENT_CURRICULUM));
+    enable(el("subjectSelect"));
+  } catch (e) {
+    alert("Could not load curriculum.");
+  }
 }
 
 function onSubjectChange() {
   const classVal = el("classSelect").value;
   const subjectVal = el("subjectSelect").value;
-
   clearSelect(el("bookSelect"));
   clearSelect(el("chapterSelect"));
-
   if (!subjectVal) return;
-
   const subjectNode = CURRENT_CURRICULUM[subjectVal];
   const groupsOrBooks = getGroupKeys(subjectNode);
-
   if (groupsOrBooks.length) {
     el("bookContainer").classList.remove("hidden");
     fillSelect(el("bookSelect"), groupsOrBooks);
@@ -135,10 +143,8 @@ function onSubjectChange() {
 function onBookChange() {
   const subjectVal = el("subjectSelect").value;
   const groupVal = el("bookSelect").value;
-
   clearSelect(el("chapterSelect"));
   if (!groupVal) return;
-
   const chapters = getChapters(CURRENT_CURRICULUM, subjectVal, groupVal);
   fillSelect(el("chapterSelect"), chapters.map(c => c.chapter_title));
   enable(el("chapterSelect"));
@@ -155,7 +161,6 @@ function clearSelects() {
     el(id).disabled = true;
   });
 }
-
 function fillSelect(sel, items) {
   sel.innerHTML = `<option value="">-- Select --</option>`;
   items.forEach(v => {
@@ -165,13 +170,10 @@ function fillSelect(sel, items) {
     sel.appendChild(o);
   });
 }
-
 function enable(sel) { sel.disabled = false; }
 function clearSelect(sel) {
   if (!sel) return;
-  while (sel.options.length > 1) {
-    sel.remove(1);
-  }
+  while (sel.options.length > 1) { sel.remove(1); }
 }
 
 // ---------------------------------------------------------
@@ -185,19 +187,24 @@ export async function runAutomation() {
     const chapterVal = el("chapterSelect").value;
 
     const meta = buildCleanMeta(classVal, subjectVal, bookVal, chapterVal);
+    
+    // ⭐ DYNAMIC ENDPOINTS
+    const aiApi = getGenAiEndpoint(classVal);
+    const dbApi = getDbManagerEndpoint(classVal);
 
     logHead(`🚀 Automation Started: ${chapterVal}`);
 
-    // CREATE TABLE FIRST (no break)
-    const createRes = await postJSON("/api/manageSupabase", { meta, csv: [] });
+    // 1. Create Table (using correct DB API)
+    const createRes = await postJSON(dbApi, { meta, csv: [] });
     log1(`Table ready: ${createRes.table_name}`);
 
-    // THEN call Gemini (3 retries handled in backend)
-    const gemini = await postJSON("/api/gemini", { meta });
-    log1(`Gemini OK (${gemini.questions.length} questions)`);
+    // 2. Call AI (using correct AI API)
+    log1(`Requesting AI... (${aiApi})`);
+    const gemini = await postJSON(aiApi, { meta });
+    log1(`AI Success: ${gemini.questions.length} questions`);
 
-    // Insert rows
-    const sup = await postJSON("/api/manageSupabase", { meta, csv: gemini.questions });
+    // 3. Insert Data (using correct DB API)
+    const sup = await postJSON(dbApi, { meta, csv: gemini.questions });
     log1(`Inserted: ${sup.inserted}`);
 
     alert("✔ Chapter Completed");
@@ -208,13 +215,16 @@ export async function runAutomation() {
 }
 
 // ---------------------------------------------------------
-// BULK AUTOMATION (NEW BULLETPROOF VERSION)
+// BULK AUTOMATION
 // ---------------------------------------------------------
 export async function runBulkAutomation() {
   try {
     const classVal = el("classSelect").value;
     const subjectVal = el("subjectSelect").value;
     const groupVal = el("bookSelect").value;
+
+    const aiApi = getGenAiEndpoint(classVal);
+    const dbApi = getDbManagerEndpoint(classVal);
 
     let chapters = groupVal
       ? getChapters(CURRENT_CURRICULUM, subjectVal, groupVal)
@@ -233,19 +243,16 @@ export async function runBulkAutomation() {
       logHead(`Processing: ${chapter}`);
 
       try {
-        // STEP 1 — Create table FIRST
-        const createRes = await postJSON("/api/manageSupabase", { meta, csv: [] });
+        // STEP 1 — Create table
+        const createRes = await postJSON(dbApi, { meta, csv: [] });
         log1(`Table ready: ${createRes.table_name}`);
 
-        // STEP 2 — Call Gemini
-        const gemini = await postJSON("/api/gemini", { meta });
-        log1(`Gemini OK (${gemini.questions.length})`);
+        // STEP 2 — Call AI
+        const gemini = await postJSON(aiApi, { meta });
+        log1(`AI OK (${gemini.questions.length})`);
 
-        // STEP 3 — Insert into table
-        const sup = await postJSON("/api/manageSupabase", {
-          meta,
-          csv: gemini.questions
-        });
+        // STEP 3 — Insert
+        const sup = await postJSON(dbApi, { meta, csv: gemini.questions });
 
         done++;
         log1(`✔ Completed ${done}/${total}`);
@@ -271,9 +278,7 @@ document.addEventListener("DOMContentLoaded", () => {
   el("subjectSelect").addEventListener("change", onSubjectChange);
   el("bookSelect").addEventListener("change", onBookChange);
   el("chapterSelect").addEventListener("change", onChapterChange);
-
   el("generateBtn").addEventListener("click", runAutomation);
   el("bulkGenerateBtn").addEventListener("click", runBulkAutomation);
-
-  log1("Ready4Exam Automation Loaded");
+  log1("Ready4Exam Automation Loaded (TS Support Enabled)");
 });
