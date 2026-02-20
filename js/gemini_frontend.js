@@ -1,85 +1,8 @@
 // ============================================================================
-// gemini_frontend.js — ADAPTIVE NCERT SUMMARY UPDATE
+// gemini_frontend.js — CONSOLIDATED & CORRECTED
 // ============================================================================
 
 const API_BASE = "https://ready4exam-master-automation.vercel.app";
-let CURRENT_CURRICULUM = null;
-
-// ... (Basic Helpers: el, appendLog, postJSON remain the same) ...
-
-/**
- * DETERMINES DISCIPLINE
- * Used to trigger specialized AI prompts (e.g., History vs Civics)
- */
-function getDiscipline(subjectVal, bookVal) {
-  // Logic: Social Science -> "History", Science -> "Biology", Math -> "Mathematics"
-  return bookVal || subjectVal || "General";
-}
-
-/**
- * BUILDS SUMMARY METADATA
- * Prepares the payload for the adaptive AI prompt and Firestore ID
- */
-function buildSummaryMeta(classVal, subjectVal, bookVal, chapterVal) {
-  const safeChapter = chapterVal.toLowerCase().replace(/[^a-z0-9]+/g, "_");
-  const discipline = getDiscipline(subjectVal, bookVal);
-
-  return {
-    classId: classVal,
-    subject: subjectVal,
-    topicSlug: safeChapter,
-    discipline: discipline, // Critical for AI context
-    chapterTitle: chapterVal
-  };
-}
-
-/**
- * RUN SUMMARY AUTOMATION
- * Targeted Firestore generation for Math, Science, and Social Science
- */
-export async function runSummaryAutomation() {
-  try {
-    const classVal = el("classSelect").value;
-    const subjectVal = el("subjectSelect").value;
-    const bookVal = el("bookSelect").value;
-    const chapterVal = el("chapterSelect").value;
-
-    if (!chapterVal) return alert("Select a chapter first.");
-
-    const meta = buildSummaryMeta(classVal, subjectVal, bookVal, chapterVal);
-    const aiApi = "/api/generate_ncert_summary";
-    const dbApi = "/api/store_ncert_summary";
-
-    logHead(`📝 Generating Adaptive Summary: ${chapterVal}`);
-    log1(`Discipline: ${meta.discipline}`);
-
-    // 1. Call Adaptive AI
-    // The backend uses meta.discipline to decide if it needs formulas (Math) or dates (History)
-    const summaryData = await postJSON(aiApi, { meta });
-    log1(`AI Success: Received structured ${meta.discipline} data`);
-
-    // 2. Store in Firestore ncert_summaries
-    // The backend uses meta.topicSlug as the Document ID (e.g., class9_science_motion)
-    const storeRes = await postJSON(dbApi, { meta, data: summaryData });
-    const docId = storeRes.id || `${meta.classId}_${meta.subject}_${meta.topicSlug}`;
-
-    log1(`✅ Firestore Document Ready: ${docId}`, "success");
-    updateSummaryStatus(chapterVal, "Success", docId);
-    alert(`✔ ${meta.discipline} Summary Stored!`);
-
-  } catch (err) {
-    log1(`❌ Error: ${err.message}`, "error");
-    updateSummaryStatus(el("chapterSelect").value, "❌ Failed");
-  }
-}
-
-// ... (Remaining Bulk Logic and UI Init remain unchanged) ...
-// ============================================================================
-// gemini_frontend.js — UPDATED (Routes 9_telangana to separate DB file)
-// ============================================================================
-
-const API_BASE = "https://ready4exam-master-automation.vercel.app";
-
 let CURRENT_CURRICULUM = null;
 
 // ---------------------------------------------------------
@@ -140,7 +63,7 @@ function getSummaryStorageEndpoint(classVal) {
 }
 
 // ---------------------------------------------------------
-// CLASS / BOOK LOGIC
+// CLASS / BOOK / DISCIPLINE LOGIC
 // ---------------------------------------------------------
 function createSlug(text) {
   if (!text) return "";
@@ -149,10 +72,13 @@ function createSlug(text) {
     .replace(/^_+|_+$/g, "");
 }
 
+/**
+ * DETERMINES DISCIPLINE
+ * Used to trigger specialized AI prompts (e.g., History vs Civics vs Physics)
+ */
 function getDiscipline(subjectVal, bookVal) {
-  // If book is present (e.g. Social Science -> History), use book.
-  // Otherwise use subject (e.g. Science).
-  return bookVal || subjectVal || "";
+  // Logic: Social Science -> "History", Science -> "Biology", Math -> "Mathematics"
+  return bookVal || subjectVal || "General";
 }
 
 function buildCleanMeta(classVal, subjectVal, groupOrBookVal, chapterVal) {
@@ -173,10 +99,11 @@ function buildSummaryMeta(classVal, subjectVal, bookVal, chapterVal) {
     subject: subjectVal,
     topicSlug: safeChapter,
     discipline: discipline,
-    // inclusive of original fields just in case
+    // inclusive of original fields just in case backend requires them
     class_name: classVal,
     book: bookVal,
-    chapter: chapterVal
+    chapter: chapterVal,
+    chapterTitle: chapterVal
   };
 }
 
@@ -193,15 +120,17 @@ async function loadCurriculumForClass(classNum) {
 }
 
 // ---------------------------------------------------------
-// DROPDOWN HANDLERS (Standard logic)
+// DROPDOWN HANDLERS
 // ---------------------------------------------------------
 function getSubjectKeys(c) { return Object.keys(c).sort(); }
 function getGroupKeys(subjectNode) { return Array.isArray(subjectNode) ? [] : Object.keys(subjectNode); }
+
 function getChapters(c, subject, groupOrBook) {
   const node = c[subject];
   if (!node) return [];
   return Array.isArray(node) ? node : node[groupOrBook] || [];
 }
+
 function getAllChaptersForSubject(c, subject) {
   const node = c[subject];
   if (!node) return [];
@@ -210,6 +139,7 @@ function getAllChaptersForSubject(c, subject) {
   for (const arr of Object.values(node)) if (Array.isArray(arr)) all.push(...arr);
   return all;
 }
+
 function getUniqueChapters(list) {
   const out = [];
   const seen = new Set();
@@ -236,7 +166,6 @@ async function onClassChange() {
 }
 
 function onSubjectChange() {
-  const classVal = el("classSelect").value;
   const subjectVal = el("subjectSelect").value;
   clearSelect(el("bookSelect"));
   clearSelect(el("chapterSelect"));
@@ -279,6 +208,7 @@ function clearSelects() {
     el(id).disabled = true;
   });
 }
+
 function fillSelect(sel, items) {
   sel.innerHTML = `<option value="">-- Select --</option>`;
   items.forEach(v => {
@@ -288,14 +218,16 @@ function fillSelect(sel, items) {
     sel.appendChild(o);
   });
 }
+
 function enable(sel) { sel.disabled = false; }
+
 function clearSelect(sel) {
   if (!sel) return;
   while (sel.options.length > 1) { sel.remove(1); }
 }
 
 // ---------------------------------------------------------
-// SINGLE AUTOMATION
+// SINGLE AUTOMATION (SUPABASE)
 // ---------------------------------------------------------
 export async function runAutomation() {
   try {
@@ -305,26 +237,19 @@ export async function runAutomation() {
     const chapterVal = el("chapterSelect").value;
 
     const meta = buildCleanMeta(classVal, subjectVal, bookVal, chapterVal);
-    
-    // ⭐ DYNAMIC ENDPOINTS
     const aiApi = getGenAiEndpoint(classVal);
     const dbApi = getDbManagerEndpoint(classVal);
 
     logHead(`🚀 Automation Started: ${chapterVal}`);
-
-    // 1. Create Table (using correct DB API)
     const createRes = await postJSON(dbApi, { meta, csv: [] });
     log1(`Table ready: ${createRes.table_name}`);
 
-    // 2. Call AI (using correct AI API)
     log1(`Requesting AI... (${aiApi})`);
     const gemini = await postJSON(aiApi, { meta });
     log1(`AI Success: ${gemini.questions.length} questions`);
 
-    // 3. Insert Data (using correct DB API)
     const sup = await postJSON(dbApi, { meta, csv: gemini.questions });
     log1(`Inserted: ${sup.inserted}`);
-
     alert("✔ Chapter Completed");
   } catch (err) {
     log1("❌ " + err.message);
@@ -333,7 +258,7 @@ export async function runAutomation() {
 }
 
 // ---------------------------------------------------------
-// BULK AUTOMATION
+// BULK AUTOMATION (SUPABASE)
 // ---------------------------------------------------------
 export async function runBulkAutomation() {
   try {
@@ -357,39 +282,26 @@ export async function runBulkAutomation() {
     for (const ch of list) {
       const chapter = ch.chapter_title;
       const meta = buildCleanMeta(classVal, subjectVal, groupVal, chapter);
-
       logHead(`Processing: ${chapter}`);
-
       try {
-        // STEP 1 — Create table
-        const createRes = await postJSON(dbApi, { meta, csv: [] });
-        log1(`Table ready: ${createRes.table_name}`);
-
-        // STEP 2 — Call AI
+        await postJSON(dbApi, { meta, csv: [] });
         const gemini = await postJSON(aiApi, { meta });
-        log1(`AI OK (${gemini.questions.length})`);
-
-        // STEP 3 — Insert
-        const sup = await postJSON(dbApi, { meta, csv: gemini.questions });
-
+        await postJSON(dbApi, { meta, csv: gemini.questions });
         done++;
         log1(`✔ Completed ${done}/${total}`);
-
       } catch (err) {
         log1(`❌ Failed: ${err.message}`);
       }
     }
-
     logHead("🎉 BULK COMPLETED");
     alert("Bulk Completed");
-
   } catch (err) {
     log1("❌ Bulk Error: " + err.message);
   }
 }
 
 // ---------------------------------------------------------
-// SUMMARY AUTOMATION
+// SUMMARY AUTOMATION (FIRESTORE)
 // ---------------------------------------------------------
 function updateSummaryProgress(done, total) {
   const container = el("summaryProgressContainer");
@@ -429,28 +341,25 @@ export async function runSummaryAutomation() {
     const bookVal = el("bookSelect").value;
     const chapterVal = el("chapterSelect").value;
 
-    if (!chapterVal) {
-      alert("Please select a chapter.");
-      return;
-    }
+    if (!chapterVal) return alert("Please select a chapter.");
 
     const meta = buildSummaryMeta(classVal, subjectVal, bookVal, chapterVal);
     const aiApi = getSummaryAiEndpoint(classVal);
     const dbApi = getSummaryStorageEndpoint(classVal);
 
-    logHead(`📝 Summary Generation: ${chapterVal}`);
+    logHead(`📝 Adaptive Summary Generation: ${chapterVal}`);
+    log1(`Discipline: ${meta.discipline}`);
 
     log1(`Requesting Summary AI...`);
     const summaryData = await postJSON(aiApi, { meta });
-    log1(`AI Success. Storing to Firestore...`);
+    log1(`AI Success (${meta.discipline}). Storing to Firestore...`);
 
     const storeRes = await postJSON(dbApi, { meta, data: summaryData });
-    const docId = storeRes.id || meta.topicSlug;
+    const docId = storeRes.id || `${meta.classId}_${meta.subject}_${meta.topicSlug}`;
 
-    log1(`Stored: ${docId}`);
+    log1(`✅ Stored Document: ${docId}`);
     updateSummaryStatus(chapterVal, "Success", docId);
-    alert("✔ Summary Generated");
-
+    alert(`✔ ${meta.discipline} Summary Stored!`);
   } catch (err) {
     log1("❌ " + err.message);
     updateSummaryStatus(el("chapterSelect").value, "❌ Failed");
@@ -475,39 +384,29 @@ export async function runBulkSummaryAutomation() {
     const total = list.length;
     let done = 0;
 
-    // Reset Progress
     el("summaryStatusTbody").innerHTML = "";
     updateSummaryProgress(0, total);
-
     logHead(`🔥 BULK SUMMARY STARTED (${total} chapters)`);
 
     for (const ch of list) {
       const chapter = ch.chapter_title;
       const meta = buildSummaryMeta(classVal, subjectVal, groupVal, chapter);
-
       logHead(`Processing Summary: ${chapter}`);
-
       try {
         const summaryData = await postJSON(aiApi, { meta });
-        log1(`AI OK`);
-
         const storeRes = await postJSON(dbApi, { meta, data: summaryData });
-        const docId = storeRes.id || meta.topicSlug;
-
+        const docId = storeRes.id || `${meta.classId}_${meta.subject}_${meta.topicSlug}`;
         done++;
         updateSummaryProgress(done, total);
         updateSummaryStatus(chapter, "Success", docId);
         log1(`✔ Stored ${docId}`);
-
       } catch (err) {
         log1(`❌ Failed: ${err.message}`);
         updateSummaryStatus(chapter, "❌ " + err.message);
       }
     }
-
     logHead("🎉 BULK SUMMARY COMPLETED");
     alert("Bulk Summary Completed");
-
   } catch (err) {
     log1("❌ Bulk Error: " + err.message);
   }
@@ -525,5 +424,5 @@ document.addEventListener("DOMContentLoaded", () => {
   el("bulkGenerateBtn").addEventListener("click", runBulkAutomation);
   el("generateSummaryBtn").addEventListener("click", runSummaryAutomation);
   el("bulkGenerateSummaryBtn").addEventListener("click", runBulkSummaryAutomation);
-  log1("Ready4Exam Automation Loaded (TS Support Enabled)");
+  log1("Ready4Exam Automation Loaded (TS/Adaptive Summary Enabled)");
 });
