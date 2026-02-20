@@ -1,4 +1,80 @@
 // ============================================================================
+// gemini_frontend.js — ADAPTIVE NCERT SUMMARY UPDATE
+// ============================================================================
+
+const API_BASE = "https://ready4exam-master-automation.vercel.app";
+let CURRENT_CURRICULUM = null;
+
+// ... (Basic Helpers: el, appendLog, postJSON remain the same) ...
+
+/**
+ * DETERMINES DISCIPLINE
+ * Used to trigger specialized AI prompts (e.g., History vs Civics)
+ */
+function getDiscipline(subjectVal, bookVal) {
+  // Logic: Social Science -> "History", Science -> "Biology", Math -> "Mathematics"
+  return bookVal || subjectVal || "General";
+}
+
+/**
+ * BUILDS SUMMARY METADATA
+ * Prepares the payload for the adaptive AI prompt and Firestore ID
+ */
+function buildSummaryMeta(classVal, subjectVal, bookVal, chapterVal) {
+  const safeChapter = chapterVal.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+  const discipline = getDiscipline(subjectVal, bookVal);
+
+  return {
+    classId: classVal,
+    subject: subjectVal,
+    topicSlug: safeChapter,
+    discipline: discipline, // Critical for AI context
+    chapterTitle: chapterVal
+  };
+}
+
+/**
+ * RUN SUMMARY AUTOMATION
+ * Targeted Firestore generation for Math, Science, and Social Science
+ */
+export async function runSummaryAutomation() {
+  try {
+    const classVal = el("classSelect").value;
+    const subjectVal = el("subjectSelect").value;
+    const bookVal = el("bookSelect").value;
+    const chapterVal = el("chapterSelect").value;
+
+    if (!chapterVal) return alert("Select a chapter first.");
+
+    const meta = buildSummaryMeta(classVal, subjectVal, bookVal, chapterVal);
+    const aiApi = "/api/generate_ncert_summary";
+    const dbApi = "/api/store_ncert_summary";
+
+    logHead(`📝 Generating Adaptive Summary: ${chapterVal}`);
+    log1(`Discipline: ${meta.discipline}`);
+
+    // 1. Call Adaptive AI
+    // The backend uses meta.discipline to decide if it needs formulas (Math) or dates (History)
+    const summaryData = await postJSON(aiApi, { meta });
+    log1(`AI Success: Received structured ${meta.discipline} data`);
+
+    // 2. Store in Firestore ncert_summaries
+    // The backend uses meta.topicSlug as the Document ID (e.g., class9_science_motion)
+    const storeRes = await postJSON(dbApi, { meta, data: summaryData });
+    const docId = storeRes.id || `${meta.classId}_${meta.subject}_${meta.topicSlug}`;
+
+    log1(`✅ Firestore Document Ready: ${docId}`, "success");
+    updateSummaryStatus(chapterVal, "Success", docId);
+    alert(`✔ ${meta.discipline} Summary Stored!`);
+
+  } catch (err) {
+    log1(`❌ Error: ${err.message}`, "error");
+    updateSummaryStatus(el("chapterSelect").value, "❌ Failed");
+  }
+}
+
+// ... (Remaining Bulk Logic and UI Init remain unchanged) ...
+// ============================================================================
 // gemini_frontend.js — UPDATED (Routes 9_telangana to separate DB file)
 // ============================================================================
 
