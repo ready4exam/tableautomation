@@ -23,12 +23,30 @@ function logHead(msg) {
 async function postJSON(path, data) {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+
+    // IMPORTANT:
+    // text/plain prevents browser preflight (no OPTIONS request)
+    headers: {
+      "Content-Type": "text/plain"
+    },
+
+    // still sending JSON — backend will parse manually
     body: JSON.stringify(data)
   });
 
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error || "Request failed");
+  const text = await res.text();
+
+  let json = {};
+  try {
+    json = JSON.parse(text);
+  } catch (e) {
+    // non-json responses (like 500 HTML) still readable
+  }
+
+  if (!res.ok) {
+    throw new Error(json.error || text || "Request failed");
+  }
+
   return json;
 }
 
