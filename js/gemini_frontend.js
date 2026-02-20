@@ -53,15 +53,54 @@ function getDbManagerEndpoint(classVal) {
   return "/api/manageSupabase";
 }
 
+// 3. WHICH SUMMARY ENGINE?
+function getSummaryAiEndpoint(classVal) {
+  return "/api/generate_ncert_summary";
+}
+
+// 4. WHICH SUMMARY STORAGE?
+function getSummaryStorageEndpoint(classVal) {
+  return "/api/store_ncert_summary";
+}
+
 // ---------------------------------------------------------
 // CLASS / BOOK LOGIC
 // ---------------------------------------------------------
+function createSlug(text) {
+  if (!text) return "";
+  return text.toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function getDiscipline(subjectVal, bookVal) {
+  // If book is present (e.g. Social Science -> History), use book.
+  // Otherwise use subject (e.g. Science).
+  return bookVal || subjectVal || "";
+}
+
 function buildCleanMeta(classVal, subjectVal, groupOrBookVal, chapterVal) {
   return {
     class_name: classVal || "",
     subject: subjectVal || "",
     book: groupOrBookVal || "",
     chapter: chapterVal || ""
+  };
+}
+
+function buildSummaryMeta(classVal, subjectVal, bookVal, chapterVal) {
+  const safeChapter = createSlug(chapterVal);
+  const discipline = getDiscipline(subjectVal, bookVal);
+
+  return {
+    classId: classVal,
+    subject: subjectVal,
+    topicSlug: safeChapter,
+    discipline: discipline,
+    // inclusive of original fields just in case
+    class_name: classVal,
+    book: bookVal,
+    chapter: chapterVal
   };
 }
 
@@ -151,8 +190,11 @@ function onBookChange() {
 }
 
 function onChapterChange() {
-  el("generateBtn").disabled = !el("chapterSelect").value;
+  const hasChapter = !!el("chapterSelect").value;
+  el("generateBtn").disabled = !hasChapter;
+  el("generateSummaryBtn").disabled = !hasChapter;
   el("bulkGenerateBtn").disabled = false;
+  el("bulkGenerateSummaryBtn").disabled = false;
 }
 
 function clearSelects() {
@@ -271,6 +313,131 @@ export async function runBulkAutomation() {
 }
 
 // ---------------------------------------------------------
+// SUMMARY AUTOMATION
+// ---------------------------------------------------------
+function updateSummaryProgress(done, total) {
+  const container = el("summaryProgressContainer");
+  const bar = el("summaryProgressBarInner");
+  const label = el("summaryProgressLabel");
+
+  if (total > 0) {
+    container.classList.remove("hidden");
+    const pct = Math.round((done / total) * 100);
+    bar.style.width = `${pct}%`;
+    label.textContent = `${done} / ${total}`;
+  } else {
+    container.classList.add("hidden");
+  }
+}
+
+function updateSummaryStatus(chapter, status, docId = "-") {
+  const container = el("summaryStatusContainer");
+  const tbody = el("summaryStatusTbody");
+  container.classList.remove("hidden");
+
+  const row = document.createElement("tr");
+  const color = status.includes("❌") ? "text-red-600" : "text-green-600";
+
+  row.innerHTML = `
+    <td class="border px-2 py-1">${chapter}</td>
+    <td class="border px-2 py-1 ${color}">${status}</td>
+    <td class="border px-2 py-1 font-mono text-xs text-gray-500">${docId}</td>
+  `;
+  tbody.prepend(row);
+}
+
+export async function runSummaryAutomation() {
+  try {
+    const classVal = el("classSelect").value;
+    const subjectVal = el("subjectSelect").value;
+    const bookVal = el("bookSelect").value;
+    const chapterVal = el("chapterSelect").value;
+
+    if (!chapterVal) {
+      alert("Please select a chapter.");
+      return;
+    }
+
+    const meta = buildSummaryMeta(classVal, subjectVal, bookVal, chapterVal);
+    const aiApi = getSummaryAiEndpoint(classVal);
+    const dbApi = getSummaryStorageEndpoint(classVal);
+
+    logHead(`📝 Summary Generation: ${chapterVal}`);
+
+    log1(`Requesting Summary AI...`);
+    const summaryData = await postJSON(aiApi, { meta });
+    log1(`AI Success. Storing to Firestore...`);
+
+    const storeRes = await postJSON(dbApi, { meta, data: summaryData });
+    const docId = storeRes.id || meta.topicSlug;
+
+    log1(`Stored: ${docId}`);
+    updateSummaryStatus(chapterVal, "Success", docId);
+    alert("✔ Summary Generated");
+
+  } catch (err) {
+    log1("❌ " + err.message);
+    updateSummaryStatus(el("chapterSelect").value, "❌ Failed");
+    alert(err.message);
+  }
+}
+
+export async function runBulkSummaryAutomation() {
+  try {
+    const classVal = el("classSelect").value;
+    const subjectVal = el("subjectSelect").value;
+    const groupVal = el("bookSelect").value;
+
+    const aiApi = getSummaryAiEndpoint(classVal);
+    const dbApi = getSummaryStorageEndpoint(classVal);
+
+    let chapters = groupVal
+      ? getChapters(CURRENT_CURRICULUM, subjectVal, groupVal)
+      : getAllChaptersForSubject(CURRENT_CURRICULUM, subjectVal);
+
+    const list = getUniqueChapters(chapters);
+    const total = list.length;
+    let done = 0;
+
+    // Reset Progress
+    el("summaryStatusTbody").innerHTML = "";
+    updateSummaryProgress(0, total);
+
+    logHead(`🔥 BULK SUMMARY STARTED (${total} chapters)`);
+
+    for (const ch of list) {
+      const chapter = ch.chapter_title;
+      const meta = buildSummaryMeta(classVal, subjectVal, groupVal, chapter);
+
+      logHead(`Processing Summary: ${chapter}`);
+
+      try {
+        const summaryData = await postJSON(aiApi, { meta });
+        log1(`AI OK`);
+
+        const storeRes = await postJSON(dbApi, { meta, data: summaryData });
+        const docId = storeRes.id || meta.topicSlug;
+
+        done++;
+        updateSummaryProgress(done, total);
+        updateSummaryStatus(chapter, "Success", docId);
+        log1(`✔ Stored ${docId}`);
+
+      } catch (err) {
+        log1(`❌ Failed: ${err.message}`);
+        updateSummaryStatus(chapter, "❌ " + err.message);
+      }
+    }
+
+    logHead("🎉 BULK SUMMARY COMPLETED");
+    alert("Bulk Summary Completed");
+
+  } catch (err) {
+    log1("❌ Bulk Error: " + err.message);
+  }
+}
+
+// ---------------------------------------------------------
 // INIT
 // ---------------------------------------------------------
 document.addEventListener("DOMContentLoaded", () => {
@@ -280,5 +447,7 @@ document.addEventListener("DOMContentLoaded", () => {
   el("chapterSelect").addEventListener("change", onChapterChange);
   el("generateBtn").addEventListener("click", runAutomation);
   el("bulkGenerateBtn").addEventListener("click", runBulkAutomation);
+  el("generateSummaryBtn").addEventListener("click", runSummaryAutomation);
+  el("bulkGenerateSummaryBtn").addEventListener("click", runBulkSummaryAutomation);
   log1("Ready4Exam Automation Loaded (TS Support Enabled)");
 });
