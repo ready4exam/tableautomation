@@ -1,9 +1,8 @@
 // ============================================================================
-// gemini_frontend.js — UPDATED (Routes 9_telangana to separate DB file)
+// gemini_frontend.js — CONSOLIDATED & CORRECTED
 // ============================================================================
 
 const API_BASE = "https://ready4exam-master-automation.vercel.app";
-
 let CURRENT_CURRICULUM = null;
 
 // ---------------------------------------------------------
@@ -24,12 +23,30 @@ function logHead(msg) {
 async function postJSON(path, data) {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+
+    // IMPORTANT:
+    // text/plain prevents browser preflight (no OPTIONS request)
+    headers: {
+      "Content-Type": "text/plain"
+    },
+
+    // still sending JSON — backend will parse manually
     body: JSON.stringify(data)
   });
 
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error || "Request failed");
+  const text = await res.text();
+
+  let json = {};
+  try {
+    json = JSON.parse(text);
+  } catch (e) {
+    // non-json responses (like 500 HTML) still readable
+  }
+
+  if (!res.ok) {
+    throw new Error(json.error || text || "Request failed");
+  }
+
   return json;
 }
 
@@ -64,7 +81,7 @@ function getSummaryStorageEndpoint(classVal) {
 }
 
 // ---------------------------------------------------------
-// CLASS / BOOK LOGIC
+// CLASS / BOOK / DISCIPLINE LOGIC
 // ---------------------------------------------------------
 function createSlug(text) {
   if (!text) return "";
@@ -117,15 +134,17 @@ async function loadCurriculumForClass(classNum) {
 }
 
 // ---------------------------------------------------------
-// DROPDOWN HANDLERS (Standard logic)
+// DROPDOWN HANDLERS
 // ---------------------------------------------------------
 function getSubjectKeys(c) { return Object.keys(c).sort(); }
 function getGroupKeys(subjectNode) { return Array.isArray(subjectNode) ? [] : Object.keys(subjectNode); }
+
 function getChapters(c, subject, groupOrBook) {
   const node = c[subject];
   if (!node) return [];
   return Array.isArray(node) ? node : node[groupOrBook] || [];
 }
+
 function getAllChaptersForSubject(c, subject) {
   const node = c[subject];
   if (!node) return [];
@@ -134,6 +153,7 @@ function getAllChaptersForSubject(c, subject) {
   for (const arr of Object.values(node)) if (Array.isArray(arr)) all.push(...arr);
   return all;
 }
+
 function getUniqueChapters(list) {
   const out = [];
   const seen = new Set();
@@ -160,7 +180,6 @@ async function onClassChange() {
 }
 
 function onSubjectChange() {
-  const classVal = el("classSelect").value;
   const subjectVal = el("subjectSelect").value;
   clearSelect(el("bookSelect"));
   clearSelect(el("chapterSelect"));
@@ -203,6 +222,7 @@ function clearSelects() {
     el(id).disabled = true;
   });
 }
+
 function fillSelect(sel, items) {
   sel.innerHTML = `<option value="">-- Select --</option>`;
   items.forEach(v => {
@@ -212,14 +232,16 @@ function fillSelect(sel, items) {
     sel.appendChild(o);
   });
 }
+
 function enable(sel) { sel.disabled = false; }
+
 function clearSelect(sel) {
   if (!sel) return;
   while (sel.options.length > 1) { sel.remove(1); }
 }
 
 // ---------------------------------------------------------
-// SINGLE AUTOMATION
+// SINGLE AUTOMATION (SUPABASE)
 // ---------------------------------------------------------
 export async function runAutomation() {
   try {
@@ -229,26 +251,19 @@ export async function runAutomation() {
     const chapterVal = el("chapterSelect").value;
 
     const meta = buildCleanMeta(classVal, subjectVal, bookVal, chapterVal);
-    
-    // ⭐ DYNAMIC ENDPOINTS
     const aiApi = getGenAiEndpoint(classVal);
     const dbApi = getDbManagerEndpoint(classVal);
 
     logHead(`🚀 Automation Started: ${chapterVal}`);
-
-    // 1. Create Table (using correct DB API)
     const createRes = await postJSON(dbApi, { meta, csv: [] });
     log1(`Table ready: ${createRes.table_name}`);
 
-    // 2. Call AI (using correct AI API)
     log1(`Requesting AI... (${aiApi})`);
     const gemini = await postJSON(aiApi, { meta });
     log1(`AI Success: ${gemini.questions.length} questions`);
 
-    // 3. Insert Data (using correct DB API)
     const sup = await postJSON(dbApi, { meta, csv: gemini.questions });
     log1(`Inserted: ${sup.inserted}`);
-
     alert("✔ Chapter Completed");
   } catch (err) {
     log1("❌ " + err.message);
@@ -257,7 +272,7 @@ export async function runAutomation() {
 }
 
 // ---------------------------------------------------------
-// BULK AUTOMATION
+// BULK AUTOMATION (SUPABASE)
 // ---------------------------------------------------------
 export async function runBulkAutomation() {
   try {
@@ -281,32 +296,131 @@ export async function runBulkAutomation() {
     for (const ch of list) {
       const chapter = ch.chapter_title;
       const meta = buildCleanMeta(classVal, subjectVal, groupVal, chapter);
-
       logHead(`Processing: ${chapter}`);
-
       try {
-        // STEP 1 — Create table
-        const createRes = await postJSON(dbApi, { meta, csv: [] });
-        log1(`Table ready: ${createRes.table_name}`);
-
-        // STEP 2 — Call AI
+        await postJSON(dbApi, { meta, csv: [] });
         const gemini = await postJSON(aiApi, { meta });
-        log1(`AI OK (${gemini.questions.length})`);
-
-        // STEP 3 — Insert
-        const sup = await postJSON(dbApi, { meta, csv: gemini.questions });
-
+        await postJSON(dbApi, { meta, csv: gemini.questions });
         done++;
         log1(`✔ Completed ${done}/${total}`);
-
       } catch (err) {
         log1(`❌ Failed: ${err.message}`);
       }
     }
-
     logHead("🎉 BULK COMPLETED");
     alert("Bulk Completed");
+  } catch (err) {
+    log1("❌ Bulk Error: " + err.message);
+  }
+}
 
+// ---------------------------------------------------------
+// SUMMARY AUTOMATION (FIRESTORE)
+// ---------------------------------------------------------
+function updateSummaryProgress(done, total) {
+  const container = el("summaryProgressContainer");
+  const bar = el("summaryProgressBarInner");
+  const label = el("summaryProgressLabel");
+
+  if (total > 0) {
+    container.classList.remove("hidden");
+    const pct = Math.round((done / total) * 100);
+    bar.style.width = `${pct}%`;
+    label.textContent = `${done} / ${total}`;
+  } else {
+    container.classList.add("hidden");
+  }
+}
+
+function updateSummaryStatus(chapter, status, docId = "-") {
+  const container = el("summaryStatusContainer");
+  const tbody = el("summaryStatusTbody");
+  container.classList.remove("hidden");
+
+  const row = document.createElement("tr");
+  const color = status.includes("❌") ? "text-red-600" : "text-green-600";
+
+  row.innerHTML = `
+    <td class="border px-2 py-1">${chapter}</td>
+    <td class="border px-2 py-1 ${color}">${status}</td>
+    <td class="border px-2 py-1 font-mono text-xs text-gray-500">${docId}</td>
+  `;
+  tbody.prepend(row);
+}
+
+export async function runSummaryAutomation() {
+  try {
+    const classVal = el("classSelect").value;
+    const subjectVal = el("subjectSelect").value;
+    const bookVal = el("bookSelect").value;
+    const chapterVal = el("chapterSelect").value;
+
+    if (!chapterVal) return alert("Please select a chapter.");
+
+    const meta = buildSummaryMeta(classVal, subjectVal, bookVal, chapterVal);
+    const aiApi = getSummaryAiEndpoint(classVal);
+    const dbApi = getSummaryStorageEndpoint(classVal);
+
+    logHead(`📝 Adaptive Summary Generation: ${chapterVal}`);
+    log1(`Discipline: ${meta.discipline}`);
+
+    log1(`Requesting Summary AI...`);
+    const summaryData = await postJSON(aiApi, { meta });
+    log1(`AI Success (${meta.discipline}). Storing to Firestore...`);
+
+    const storeRes = await postJSON(dbApi, { meta, data: summaryData });
+    const docId = storeRes.id || `${meta.classId}_${meta.subject}_${meta.topicSlug}`;
+
+    log1(`✅ Stored Document: ${docId}`);
+    updateSummaryStatus(chapterVal, "Success", docId);
+    alert(`✔ ${meta.discipline} Summary Stored!`);
+  } catch (err) {
+    log1("❌ " + err.message);
+    updateSummaryStatus(el("chapterSelect").value, "❌ Failed");
+    alert(err.message);
+  }
+}
+
+export async function runBulkSummaryAutomation() {
+  try {
+    const classVal = el("classSelect").value;
+    const subjectVal = el("subjectSelect").value;
+    const groupVal = el("bookSelect").value;
+
+    const aiApi = getSummaryAiEndpoint(classVal);
+    const dbApi = getSummaryStorageEndpoint(classVal);
+
+    let chapters = groupVal
+      ? getChapters(CURRENT_CURRICULUM, subjectVal, groupVal)
+      : getAllChaptersForSubject(CURRENT_CURRICULUM, subjectVal);
+
+    const list = getUniqueChapters(chapters);
+    const total = list.length;
+    let done = 0;
+
+    el("summaryStatusTbody").innerHTML = "";
+    updateSummaryProgress(0, total);
+    logHead(`🔥 BULK SUMMARY STARTED (${total} chapters)`);
+
+    for (const ch of list) {
+      const chapter = ch.chapter_title;
+      const meta = buildSummaryMeta(classVal, subjectVal, groupVal, chapter);
+      logHead(`Processing Summary: ${chapter}`);
+      try {
+        const summaryData = await postJSON(aiApi, { meta });
+        const storeRes = await postJSON(dbApi, { meta, data: summaryData });
+        const docId = storeRes.id || `${meta.classId}_${meta.subject}_${meta.topicSlug}`;
+        done++;
+        updateSummaryProgress(done, total);
+        updateSummaryStatus(chapter, "Success", docId);
+        log1(`✔ Stored ${docId}`);
+      } catch (err) {
+        log1(`❌ Failed: ${err.message}`);
+        updateSummaryStatus(chapter, "❌ " + err.message);
+      }
+    }
+    logHead("🎉 BULK SUMMARY COMPLETED");
+    alert("Bulk Summary Completed");
   } catch (err) {
     log1("❌ Bulk Error: " + err.message);
   }
