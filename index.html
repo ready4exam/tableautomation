@@ -67,10 +67,50 @@
           🔄 Refresh Table
         </button>
 
+        <button id="generateSummaryBtn"
+          class="bg-emerald-600 text-white px-5 py-2 rounded-lg shadow disabled:opacity-50"
+          disabled>
+          📝 Generate NCERT Summary
+        </button>
+
         <button id="bulkGenerateBtn"
           class="bg-purple-600 text-white px-5 py-2 rounded-lg shadow">
           📚 Bulk Generate All Chapters
         </button>
+
+        <button id="bulkGenerateSummaryBtn"
+          class="bg-emerald-800 text-white px-5 py-2 rounded-lg shadow">
+          📚 Bulk Generate Summaries
+        </button>
+      </div>
+
+      <div id="summaryProgressContainer" class="hidden mt-6">
+        <div class="text-sm font-semibold mb-1 text-gray-700">Summary Generation Progress</div>
+
+        <div class="w-full bg-gray-200 h-3 rounded">
+          <div id="summaryProgressBarInner"
+               class="h-3 rounded bg-emerald-500 transition-all duration-300"
+               style="width:0%">
+          </div>
+        </div>
+
+        <div id="summaryProgressLabel" class="text-xs mt-1 text-gray-700">0 / 0</div>
+      </div>
+
+      <div class="mt-6 hidden" id="summaryStatusContainer">
+        <h3 class="font-bold text-gray-700 mb-2">Summary Generation Status</h3>
+
+        <table class="w-full text-left text-xs border-collapse border border-gray-300">
+          <thead class="bg-gray-100">
+            <tr>
+              <th class="border px-2 py-1">Chapter</th>
+              <th class="border px-2 py-1">Status</th>
+              <th class="border px-2 py-1">Doc ID</th>
+            </tr>
+          </thead>
+
+          <tbody id="summaryStatusTbody"></tbody>
+        </table>
       </div>
 
       <div id="bulkProgressContainer" class="hidden mt-6">
