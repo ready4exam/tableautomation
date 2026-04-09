@@ -139,13 +139,10 @@ function createSlug(text) {
     .replace(/^_+|_+$/g, "");
 }
 
-/**
- * DETERMINES DISCIPLINE
- * Used to trigger specialized AI prompts (e.g., History vs Civics vs Physics)
- */
 function getDiscipline(subjectVal, bookVal) {
-  // Logic: Social Science -> "History", Science -> "Biology", Math -> "Mathematics"
-  return bookVal || subjectVal || "General";
+  // If book is present (e.g. Social Science -> History), use book.
+  // Otherwise use subject (e.g. Science).
+  return bookVal || subjectVal || "";
 }
 
 function buildCleanMeta(classVal, subjectVal, groupOrBookVal, chapterVal) {
@@ -166,11 +163,10 @@ function buildSummaryMeta(classVal, subjectVal, bookVal, chapterVal) {
     subject: subjectVal,
     topicSlug: safeChapter,
     discipline: discipline,
-    // inclusive of original fields just in case backend requires them
+    // inclusive of original fields just in case
     class_name: classVal,
     book: bookVal,
-    chapter: chapterVal,
-    chapterTitle: chapterVal
+    chapter: chapterVal
   };
 }
 
@@ -478,6 +474,131 @@ export async function runBulkSummaryAutomation() {
     }
     logHead("🎉 BULK SUMMARY COMPLETED");
     alert("Bulk Summary Completed");
+  } catch (err) {
+    log1("❌ Bulk Error: " + err.message);
+  }
+}
+
+// ---------------------------------------------------------
+// SUMMARY AUTOMATION
+// ---------------------------------------------------------
+function updateSummaryProgress(done, total) {
+  const container = el("summaryProgressContainer");
+  const bar = el("summaryProgressBarInner");
+  const label = el("summaryProgressLabel");
+
+  if (total > 0) {
+    container.classList.remove("hidden");
+    const pct = Math.round((done / total) * 100);
+    bar.style.width = `${pct}%`;
+    label.textContent = `${done} / ${total}`;
+  } else {
+    container.classList.add("hidden");
+  }
+}
+
+function updateSummaryStatus(chapter, status, docId = "-") {
+  const container = el("summaryStatusContainer");
+  const tbody = el("summaryStatusTbody");
+  container.classList.remove("hidden");
+
+  const row = document.createElement("tr");
+  const color = status.includes("❌") ? "text-red-600" : "text-green-600";
+
+  row.innerHTML = `
+    <td class="border px-2 py-1">${chapter}</td>
+    <td class="border px-2 py-1 ${color}">${status}</td>
+    <td class="border px-2 py-1 font-mono text-xs text-gray-500">${docId}</td>
+  `;
+  tbody.prepend(row);
+}
+
+export async function runSummaryAutomation() {
+  try {
+    const classVal = el("classSelect").value;
+    const subjectVal = el("subjectSelect").value;
+    const bookVal = el("bookSelect").value;
+    const chapterVal = el("chapterSelect").value;
+
+    if (!chapterVal) {
+      alert("Please select a chapter.");
+      return;
+    }
+
+    const meta = buildSummaryMeta(classVal, subjectVal, bookVal, chapterVal);
+    const aiApi = getSummaryAiEndpoint(classVal);
+    const dbApi = getSummaryStorageEndpoint(classVal);
+
+    logHead(`📝 Summary Generation: ${chapterVal}`);
+
+    log1(`Requesting Summary AI...`);
+    const summaryData = await postJSON(aiApi, { meta });
+    log1(`AI Success. Storing to Firestore...`);
+
+    const storeRes = await postJSON(dbApi, { meta, data: summaryData });
+    const docId = storeRes.id || meta.topicSlug;
+
+    log1(`Stored: ${docId}`);
+    updateSummaryStatus(chapterVal, "Success", docId);
+    alert("✔ Summary Generated");
+
+  } catch (err) {
+    log1("❌ " + err.message);
+    updateSummaryStatus(el("chapterSelect").value, "❌ Failed");
+    alert(err.message);
+  }
+}
+
+export async function runBulkSummaryAutomation() {
+  try {
+    const classVal = el("classSelect").value;
+    const subjectVal = el("subjectSelect").value;
+    const groupVal = el("bookSelect").value;
+
+    const aiApi = getSummaryAiEndpoint(classVal);
+    const dbApi = getSummaryStorageEndpoint(classVal);
+
+    let chapters = groupVal
+      ? getChapters(CURRENT_CURRICULUM, subjectVal, groupVal)
+      : getAllChaptersForSubject(CURRENT_CURRICULUM, subjectVal);
+
+    const list = getUniqueChapters(chapters);
+    const total = list.length;
+    let done = 0;
+
+    // Reset Progress
+    el("summaryStatusTbody").innerHTML = "";
+    updateSummaryProgress(0, total);
+
+    logHead(`🔥 BULK SUMMARY STARTED (${total} chapters)`);
+
+    for (const ch of list) {
+      const chapter = ch.chapter_title;
+      const meta = buildSummaryMeta(classVal, subjectVal, groupVal, chapter);
+
+      logHead(`Processing Summary: ${chapter}`);
+
+      try {
+        const summaryData = await postJSON(aiApi, { meta });
+        log1(`AI OK`);
+
+        const storeRes = await postJSON(dbApi, { meta, data: summaryData });
+        const docId = storeRes.id || meta.topicSlug;
+
+        done++;
+        updateSummaryProgress(done, total);
+        updateSummaryStatus(chapter, "Success", docId);
+        log1(`✔ Stored ${docId}`);
+
+      } catch (err) {
+        log1(`❌ Failed: ${err.message}`);
+        updateSummaryStatus(chapter, "❌ " + err.message);
+      }
+    }
+
+    logHead("🎉 BULK SUMMARY COMPLETED");
+    alert("Bulk Summary Completed");
+
   } catch (err) {
     log1("❌ Bulk Error: " + err.message);
   }
