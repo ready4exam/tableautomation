@@ -5,6 +5,55 @@
 const API_BASE = "https://ready4exam-master-automation.vercel.app";
 let CURRENT_CURRICULUM = null;
 
+
+// ---------------------------------------------------------
+// PYQ EXTRACTION AUTOMATION
+// ---------------------------------------------------------
+export async function handlePYQExtraction(gradeOverride) {
+  try {
+    let classVal = el("classSelect").value;
+    if (gradeOverride) classVal = gradeOverride;
+
+    const subjectVal = el("subjectSelect").value;
+    const bookVal = el("bookSelect").value;
+    const chapterVal = el("chapterSelect").value;
+
+    if (!chapterVal) return alert("Please select a chapter.");
+
+    logHead(`📄 PYQ Extraction Started: ${chapterVal} (Grade: ${classVal})`);
+    el("pyqLoadingSpinner").classList.remove("hidden");
+
+    const payload = {
+      grade: classVal,
+      subject: subjectVal,
+      book: bookVal,
+      chapter: chapterVal
+    };
+
+    const res = await fetch("https://ready4exam-master-automation.vercel.app/api/extract_pyq", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || "Failed to extract PYQ");
+    }
+
+    log1(`✅ PYQ Extracted Successfully: ${data.message || "Done"}`);
+    alert("✔ PYQ Extraction Completed");
+
+  } catch (err) {
+    console.error("PYQ Extraction Error:", err);
+    log1("❌ " + err.message);
+    alert(err.message);
+  } finally {
+    el("pyqLoadingSpinner").classList.add("hidden");
+  }
+}
+
 // ---------------------------------------------------------
 // BASIC HELPERS
 // ---------------------------------------------------------
@@ -214,6 +263,10 @@ function onChapterChange() {
   el("generateSummaryBtn").disabled = !hasChapter;
   el("bulkGenerateBtn").disabled = false;
   el("bulkGenerateSummaryBtn").disabled = false;
+  el("extractPyqBtn").disabled = !hasChapter;
+  el("extractPyq10Btn").disabled = !hasChapter;
+  el("pyq10").disabled = !hasChapter;
+  el("pyq12").disabled = !hasChapter;
 }
 
 function clearSelects() {
@@ -563,5 +616,9 @@ document.addEventListener("DOMContentLoaded", () => {
   el("bulkGenerateBtn").addEventListener("click", runBulkAutomation);
   el("generateSummaryBtn").addEventListener("click", runSummaryAutomation);
   el("bulkGenerateSummaryBtn").addEventListener("click", runBulkSummaryAutomation);
-  log1("Ready4Exam Automation Loaded (TS Support Enabled)");
+  el("extractPyqBtn").addEventListener("click", () => handlePYQExtraction());
+  el("extractPyq10Btn").addEventListener("click", () => handlePYQExtraction("10"));
+  el("pyq10").addEventListener("click", () => handlePYQExtraction("10"));
+  el("pyq12").addEventListener("click", () => handlePYQExtraction("12"));
+  log1("Ready4Exam Automation Loaded (TS/Adaptive Summary Enabled)");
 });
