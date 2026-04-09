@@ -82,6 +82,22 @@
           class="bg-emerald-800 text-white px-5 py-2 rounded-lg shadow">
           📚 Bulk Generate Summaries
         </button>
+
+        <button id="extractPyqBtn"
+          class="bg-indigo-600 text-white px-5 py-2 rounded-lg shadow disabled:opacity-50"
+          disabled>
+          📄 Extract PYQ
+        </button>
+
+        <button id="extractPyq10Btn"
+          class="bg-indigo-800 text-white px-5 py-2 rounded-lg shadow disabled:opacity-50"
+          disabled>
+          📄 Extract PYQ (Class 10)
+        </button>
+
+        <span id="pyqLoadingSpinner" class="hidden text-sm font-semibold text-indigo-700 animate-pulse mt-2">
+          ⏳ Extracting...
+        </span>
       </div>
 
       <div id="summaryProgressContainer" class="hidden mt-6">
