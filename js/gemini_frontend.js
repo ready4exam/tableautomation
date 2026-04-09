@@ -263,8 +263,6 @@ function onChapterChange() {
   el("generateSummaryBtn").disabled = !hasChapter;
   el("bulkGenerateBtn").disabled = false;
   el("bulkGenerateSummaryBtn").disabled = false;
-  el("extractPyqBtn").disabled = !hasChapter;
-  el("extractPyq10Btn").disabled = !hasChapter;
   el("pyq10").disabled = !hasChapter;
   el("pyq12").disabled = !hasChapter;
 }
