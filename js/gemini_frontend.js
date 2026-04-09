@@ -269,6 +269,8 @@ function onChapterChange() {
   el("bulkGenerateSummaryBtn").disabled = false;
   el("extractPyqBtn").disabled = !hasChapter;
   el("extractPyq10Btn").disabled = !hasChapter;
+  el("pyq10").disabled = !hasChapter;
+  el("pyq12").disabled = !hasChapter;
 }
 
 function clearSelects() {
@@ -495,5 +497,7 @@ document.addEventListener("DOMContentLoaded", () => {
   el("bulkGenerateSummaryBtn").addEventListener("click", runBulkSummaryAutomation);
   el("extractPyqBtn").addEventListener("click", () => handlePYQExtraction());
   el("extractPyq10Btn").addEventListener("click", () => handlePYQExtraction("10"));
+  el("pyq10").addEventListener("click", () => handlePYQExtraction("10"));
+  el("pyq12").addEventListener("click", () => handlePYQExtraction("12"));
   log1("Ready4Exam Automation Loaded (TS/Adaptive Summary Enabled)");
 });
