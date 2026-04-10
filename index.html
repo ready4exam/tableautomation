@@ -54,50 +54,56 @@
         <select id="chapterSelect" class="w-full border border-gray-300 rounded-lg p-2" disabled></select>
       </div>
 
-      <div class="flex gap-4 mt-6">
-        <button id="generateBtn"
-          class="bg-blue-700 text-white px-5 py-2 rounded-lg shadow disabled:opacity-50"
-          disabled>
-          🚀 Generate Questions
-        </button>
+      <div class="flex flex-col gap-4 mt-6">
+        <!-- Generation Row -->
+        <div class="flex flex-wrap gap-4">
+          <button id="generateBtn"
+            class="bg-blue-700 text-white px-5 py-2 rounded-lg shadow disabled:opacity-50"
+            disabled>
+            🚀 Generate Questions
+          </button>
 
-        <button id="refreshBtn"
-          class="bg-yellow-400 text-black px-5 py-2 rounded-lg shadow disabled:opacity-50"
-          disabled>
-          🔄 Refresh Table
-        </button>
+          <button id="refreshBtn"
+            class="bg-yellow-400 text-black px-5 py-2 rounded-lg shadow disabled:opacity-50"
+            disabled>
+            🔄 Refresh Table
+          </button>
 
-        <button id="generateSummaryBtn"
-          class="bg-emerald-600 text-white px-5 py-2 rounded-lg shadow disabled:opacity-50"
-          disabled>
-          📝 Generate NCERT Summary
-        </button>
+          <button id="generateSummaryBtn"
+            class="bg-emerald-600 text-white px-5 py-2 rounded-lg shadow disabled:opacity-50"
+            disabled>
+            📝 Generate NCERT Summary
+          </button>
 
-        <button id="bulkGenerateBtn"
-          class="bg-purple-600 text-white px-5 py-2 rounded-lg shadow">
-          📚 Bulk Generate All Chapters
-        </button>
+          <button id="bulkGenerateBtn"
+            class="bg-purple-600 text-white px-5 py-2 rounded-lg shadow">
+            📚 Bulk Generate All Chapters
+          </button>
 
-        <button id="bulkGenerateSummaryBtn"
-          class="bg-emerald-800 text-white px-5 py-2 rounded-lg shadow">
-          📚 Bulk Generate Summaries
-        </button>
+          <button id="bulkGenerateSummaryBtn"
+            class="bg-emerald-800 text-white px-5 py-2 rounded-lg shadow">
+            📚 Bulk Generate Summaries
+          </button>
+        </div>
 
-        <button id="pyq10"
-          class="bg-indigo-600 text-white px-5 py-2 rounded-lg shadow disabled:opacity-50"
-          disabled>
-          PYQ for 10th
-        </button>
+        <!-- PYQ Row -->
+        <div class="flex flex-wrap gap-4 items-center">
+          <button id="pyq10"
+            class="bg-indigo-600 text-white px-5 py-2 rounded-lg shadow disabled:opacity-50"
+            disabled>
+            PYQ for 10th
+          </button>
 
-        <button id="pyq12"
-          class="bg-indigo-800 text-white px-5 py-2 rounded-lg shadow disabled:opacity-50"
-          disabled>
-          PYQ for 12th
-        </button>
+          <button id="pyq12"
+            class="bg-indigo-800 text-white px-5 py-2 rounded-lg shadow disabled:opacity-50"
+            disabled>
+            PYQ for 12th
+          </button>
 
-        <span id="pyqLoadingSpinner" class="hidden text-sm font-semibold text-indigo-700 animate-pulse mt-2">
-          ⏳ Extracting...
-        </span>
+          <span id="pyqLoadingSpinner" class="hidden text-sm font-semibold text-indigo-700 animate-pulse">
+            ⏳ Extracting...
+          </span>
+        </div>
       </div>
 
       <div id="summaryProgressContainer" class="hidden mt-6">
