@@ -32,7 +32,7 @@ export async function handlePYQExtraction(gradeOverride) {
 
     const res = await fetch("https://ready4exam-master-automation.vercel.app/api/extract_pyq", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "text/plain" },
       body: JSON.stringify(payload)
     });
 
