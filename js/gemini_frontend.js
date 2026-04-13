@@ -9,11 +9,9 @@ let CURRENT_CURRICULUM = null;
 // ---------------------------------------------------------
 // PYQ EXTRACTION AUTOMATION
 // ---------------------------------------------------------
-export async function handlePYQExtraction(gradeOverride) {
+export async function handlePYQExtraction() {
   try {
-    let classVal = el("classSelect").value;
-    if (gradeOverride) classVal = gradeOverride;
-
+    const classVal = el("classSelect").value;
     const subjectVal = el("subjectSelect").value;
     const bookVal = el("bookSelect").value;
     const chapterVal = el("chapterSelect").value;
@@ -22,6 +20,7 @@ export async function handlePYQExtraction(gradeOverride) {
 
     logHead(`📄 PYQ Extraction Started: ${chapterVal} (Grade: ${classVal})`);
     el("pyqLoadingSpinner").classList.remove("hidden");
+    el("extractPyqBtn").disabled = true;
 
     const payload = {
       grade: classVal,
@@ -51,6 +50,7 @@ export async function handlePYQExtraction(gradeOverride) {
     alert(err.message);
   } finally {
     el("pyqLoadingSpinner").classList.add("hidden");
+    el("extractPyqBtn").disabled = false;
   }
 }
 
@@ -263,8 +263,7 @@ function onChapterChange() {
   el("generateSummaryBtn").disabled = !hasChapter;
   el("bulkGenerateBtn").disabled = false;
   el("bulkGenerateSummaryBtn").disabled = false;
-  el("pyq10").disabled = !hasChapter;
-  el("pyq12").disabled = !hasChapter;
+  el("extractPyqBtn").disabled = !hasChapter;
 }
 
 function clearSelects() {
@@ -485,7 +484,6 @@ document.addEventListener("DOMContentLoaded", () => {
   el("bulkGenerateBtn").addEventListener("click", runBulkAutomation);
   el("generateSummaryBtn").addEventListener("click", runSummaryAutomation);
   el("bulkGenerateSummaryBtn").addEventListener("click", runBulkSummaryAutomation);
-  el("pyq10").addEventListener("click", () => handlePYQExtraction("10"));
-  el("pyq12").addEventListener("click", () => handlePYQExtraction("12"));
+  el("extractPyqBtn").addEventListener("click", handlePYQExtraction);
   log1("Ready4Exam Automation Loaded (TS/Adaptive Summary Enabled)");
 });
