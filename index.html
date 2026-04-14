@@ -33,9 +33,9 @@
             <option value="8">Class 8</option>
             <option value="9">Class 9 (CBSE)</option>
             <option value="9_telangana">Class 9 (Telangana SCERT)</option>
-            <option value="10">Class 10</option>
+            <option value="10" data-pyq-supported="true">Class 10</option>
             <option value="11">Class 11</option>
-            <option value="12">Class 12</option>
+            <option value="12" data-pyq-supported="true">Class 12</option>
           </select>
         </div>
 
@@ -56,7 +56,6 @@
       </div>
 
       <div class="grid grid-cols-1 gap-4 mt-6">
-        <!-- Generation Row -->
         <div class="flex flex-wrap gap-4">
           <button id="generateBtn"
             class="bg-blue-700 text-white px-5 py-2 rounded-lg shadow disabled:opacity-50"
@@ -89,12 +88,15 @@
 
         <hr class="border-gray-200">
 
-        <!-- PYQ Row -->
         <div class="flex flex-wrap gap-4 items-center">
           <button id="extractPyqBtn" class="bg-indigo-700 text-white px-5 py-2 rounded-lg shadow disabled:opacity-50" disabled>🚀 Extract Chapter Intelligence</button>
 
           <span id="pyqLoadingSpinner" class="hidden text-sm font-semibold text-indigo-700 animate-pulse">
             ⏳ Extracting...
+          </span>
+          <span id="pyqUnsupportedHint"
+             class="hidden text-xs text-red-500 font-medium">
+             Chapter Intelligence is only available for Class 10 and 12
           </span>
         </div>
       </div>
