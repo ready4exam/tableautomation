@@ -11,9 +11,15 @@ let CURRENT_CURRICULUM = null;
 // ---------------------------------------------------------
 export async function handlePYQExtraction() {
   try {
+    // 1. Add class guard at the top
+    const classOption = el("classSelect").selectedOptions[0];
+    if (classOption?.dataset?.pyqSupported !== "true") {
+      alert("Chapter Intelligence is only available for Class 10 and 12.");
+      return;
+    }
+
     const classVal = el("classSelect").value;
     const subjectVal = el("subjectSelect").value;
-    const bookVal = el("bookSelect").value;
     const chapterVal = el("chapterSelect").value;
 
     if (!chapterVal) return alert("Please select a chapter.");
@@ -22,14 +28,15 @@ export async function handlePYQExtraction() {
     el("pyqLoadingSpinner").classList.remove("hidden");
     el("extractPyqBtn").disabled = true;
 
-    const payload = {
-      grade: classVal,
-      subject: subjectVal,
-      book: bookVal,
-      chapter: chapterVal
+    // 2. Build payload WITHOUT book
+    const payload = { 
+      grade: classVal, 
+      subject: subjectVal, 
+      chapter: chapterVal 
     };
 
-    const res = await fetch("https://ready4exam-master-automation.vercel.app/api/extract_pyq", {
+    // 3. Fix fetch URL to use API_BASE
+    const res = await fetch(`${API_BASE}/api/extract_pyq`, {
       method: "POST",
       headers: { "Content-Type": "text/plain" },
       body: JSON.stringify(payload)
@@ -37,12 +44,19 @@ export async function handlePYQExtraction() {
 
     const data = await res.json();
 
-    if (!res.ok) {
-      throw new Error(data.error || "Failed to extract PYQ");
+    // 4. Update response handling and alert block
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || data.message || "Extraction failed");
     }
 
-    log1(`✅ PYQ Extracted Successfully: ${data.message || "Done"}`);
-    alert("✔ PYQ Extraction Completed");
+    if (data.dispatched === false) {
+      log1(`⚠️ Not dispatched: ${data.message || data.reason}`);
+      alert(`⚠️ ${data.message || data.reason || "No PDFs found."}`);
+      return;
+    }
+
+    log1(`✅ Dispatched. ${data.pdfs_found} paper(s) sent. Output: ${data.outputPath}`);
+    alert(`✔ Extraction started. ${data.pdfs_found} paper(s) processing.`);
 
   } catch (err) {
     console.error("PYQ Extraction Error:", err);
@@ -50,7 +64,8 @@ export async function handlePYQExtraction() {
     alert(err.message);
   } finally {
     el("pyqLoadingSpinner").classList.add("hidden");
-    el("extractPyqBtn").disabled = false;
+    // State is reset via onChapterChange inside the catch/finally flow
+    onChapterChange();
   }
 }
 
@@ -72,30 +87,21 @@ function logHead(msg) {
 async function postJSON(path, data) {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
-
-    // IMPORTANT:
-    // text/plain prevents browser preflight (no OPTIONS request)
     headers: {
       "Content-Type": "text/plain"
     },
-
-    // still sending JSON — backend will parse manually
     body: JSON.stringify(data)
   });
 
   const text = await res.text();
-
   let json = {};
   try {
     json = JSON.parse(text);
-  } catch (e) {
-    // non-json responses (like 500 HTML) still readable
-  }
+  } catch (e) {}
 
   if (!res.ok) {
     throw new Error(json.error || text || "Request failed");
   }
-
   return json;
 }
 
@@ -107,24 +113,20 @@ function getRepoName(classVal) {
   return `ready4exam-class-${classVal}`;
 }
 
-// 1. WHICH AI ENGINE? (NCERT vs SCERT)
 function getGenAiEndpoint(classVal) {
   if (classVal === "9_telangana") return "/api/tel_gemini";
   return "/api/gemini";
 }
 
-// 2. WHICH DB MANAGER? (Standard vs TG)
 function getDbManagerEndpoint(classVal) {
   if (classVal === "9_telangana") return "/api/manageSupabase_tg";
   return "/api/manageSupabase";
 }
 
-// 3. WHICH SUMMARY ENGINE?
 function getSummaryAiEndpoint(classVal) {
   return "/api/generate_ncert_summary";
 }
 
-// 4. WHICH SUMMARY STORAGE?
 function getSummaryStorageEndpoint(classVal) {
   return "/api/store_ncert_summary";
 }
@@ -140,8 +142,6 @@ function createSlug(text) {
 }
 
 function getDiscipline(subjectVal, bookVal) {
-  // If book is present (e.g. Social Science -> History), use book.
-  // Otherwise use subject (e.g. Science).
   return bookVal || subjectVal || "";
 }
 
@@ -157,13 +157,11 @@ function buildCleanMeta(classVal, subjectVal, groupOrBookVal, chapterVal) {
 function buildSummaryMeta(classVal, subjectVal, bookVal, chapterVal) {
   const safeChapter = createSlug(chapterVal);
   const discipline = getDiscipline(subjectVal, bookVal);
-
   return {
     classId: classVal,
     subject: subjectVal,
     topicSlug: safeChapter,
     discipline: discipline,
-    // inclusive of original fields just in case
     class_name: classVal,
     book: bookVal,
     chapter: chapterVal
@@ -263,7 +261,17 @@ function onChapterChange() {
   el("generateSummaryBtn").disabled = !hasChapter;
   el("bulkGenerateBtn").disabled = false;
   el("bulkGenerateSummaryBtn").disabled = false;
-  el("extractPyqBtn").disabled = !hasChapter;
+
+  // 5. Add pyqOk check and reactive hint logic
+  const pyqOk = el("classSelect").selectedOptions[0]
+                ?.dataset?.pyqSupported === "true";
+  
+  el("extractPyqBtn").disabled = !hasChapter || !pyqOk;
+  
+  const hint = el("pyqUnsupportedHint");
+  if (hint) {
+    hint.classList.toggle("hidden", pyqOk);
+  }
 }
 
 function clearSelects() {
@@ -291,7 +299,7 @@ function clearSelect(sel) {
 }
 
 // ---------------------------------------------------------
-// SINGLE AUTOMATION (SUPABASE)
+// SUPABASE AUTOMATION (GENERATION)
 // ---------------------------------------------------------
 export async function runAutomation() {
   try {
@@ -299,19 +307,15 @@ export async function runAutomation() {
     const subjectVal = el("subjectSelect").value;
     const bookVal = el("bookSelect").value;
     const chapterVal = el("chapterSelect").value;
-
     const meta = buildCleanMeta(classVal, subjectVal, bookVal, chapterVal);
     const aiApi = getGenAiEndpoint(classVal);
     const dbApi = getDbManagerEndpoint(classVal);
-
     logHead(`🚀 Automation Started: ${chapterVal}`);
     const createRes = await postJSON(dbApi, { meta, csv: [] });
     log1(`Table ready: ${createRes.table_name}`);
-
     log1(`Requesting AI... (${aiApi})`);
     const gemini = await postJSON(aiApi, { meta });
     log1(`AI Success: ${gemini.questions.length} questions`);
-
     const sup = await postJSON(dbApi, { meta, csv: gemini.questions });
     log1(`Inserted: ${sup.inserted}`);
     alert("✔ Chapter Completed");
@@ -321,28 +325,18 @@ export async function runAutomation() {
   }
 }
 
-// ---------------------------------------------------------
-// BULK AUTOMATION (SUPABASE)
-// ---------------------------------------------------------
 export async function runBulkAutomation() {
   try {
     const classVal = el("classSelect").value;
     const subjectVal = el("subjectSelect").value;
     const groupVal = el("bookSelect").value;
-
     const aiApi = getGenAiEndpoint(classVal);
     const dbApi = getDbManagerEndpoint(classVal);
-
-    let chapters = groupVal
-      ? getChapters(CURRENT_CURRICULUM, subjectVal, groupVal)
-      : getAllChaptersForSubject(CURRENT_CURRICULUM, subjectVal);
-
+    let chapters = groupVal ? getChapters(CURRENT_CURRICULUM, subjectVal, groupVal) : getAllChaptersForSubject(CURRENT_CURRICULUM, subjectVal);
     const list = getUniqueChapters(chapters);
     const total = list.length;
     let done = 0;
-
     logHead(`🔥 BULK STARTED (${total} chapters)`);
-
     for (const ch of list) {
       const chapter = ch.chapter_title;
       const meta = buildCleanMeta(classVal, subjectVal, groupVal, chapter);
@@ -371,7 +365,6 @@ function updateSummaryProgress(done, total) {
   const container = el("summaryProgressContainer");
   const bar = el("summaryProgressBarInner");
   const label = el("summaryProgressLabel");
-
   if (total > 0) {
     container.classList.remove("hidden");
     const pct = Math.round((done / total) * 100);
@@ -386,15 +379,9 @@ function updateSummaryStatus(chapter, status, docId = "-") {
   const container = el("summaryStatusContainer");
   const tbody = el("summaryStatusTbody");
   container.classList.remove("hidden");
-
   const row = document.createElement("tr");
   const color = status.includes("❌") ? "text-red-600" : "text-green-600";
-
-  row.innerHTML = `
-    <td class="border px-2 py-1">${chapter}</td>
-    <td class="border px-2 py-1 ${color}">${status}</td>
-    <td class="border px-2 py-1 font-mono text-xs text-gray-500">${docId}</td>
-  `;
+  row.innerHTML = `<td class="border px-2 py-1">${chapter}</td><td class="border px-2 py-1 ${color}">${status}</td><td class="border px-2 py-1 font-mono text-xs text-gray-500">${docId}</td>`;
   tbody.prepend(row);
 }
 
@@ -404,23 +391,17 @@ export async function runSummaryAutomation() {
     const subjectVal = el("subjectSelect").value;
     const bookVal = el("bookSelect").value;
     const chapterVal = el("chapterSelect").value;
-
     if (!chapterVal) return alert("Please select a chapter.");
-
     const meta = buildSummaryMeta(classVal, subjectVal, bookVal, chapterVal);
     const aiApi = getSummaryAiEndpoint(classVal);
     const dbApi = getSummaryStorageEndpoint(classVal);
-
     logHead(`📝 Adaptive Summary Generation: ${chapterVal}`);
     log1(`Discipline: ${meta.discipline}`);
-
     log1(`Requesting Summary AI...`);
     const summaryData = await postJSON(aiApi, { meta });
     log1(`AI Success (${meta.discipline}). Storing to Firestore...`);
-
     const storeRes = await postJSON(dbApi, { meta, data: summaryData });
     const docId = storeRes.id || `${meta.classId}_${meta.subject}_${meta.topicSlug}`;
-
     log1(`✅ Stored Document: ${docId}`);
     updateSummaryStatus(chapterVal, "Success", docId);
     alert(`✔ ${meta.discipline} Summary Stored!`);
@@ -436,22 +417,15 @@ export async function runBulkSummaryAutomation() {
     const classVal = el("classSelect").value;
     const subjectVal = el("subjectSelect").value;
     const groupVal = el("bookSelect").value;
-
     const aiApi = getSummaryAiEndpoint(classVal);
     const dbApi = getSummaryStorageEndpoint(classVal);
-
-    let chapters = groupVal
-      ? getChapters(CURRENT_CURRICULUM, subjectVal, groupVal)
-      : getAllChaptersForSubject(CURRENT_CURRICULUM, subjectVal);
-
+    let chapters = groupVal ? getChapters(CURRENT_CURRICULUM, subjectVal, groupVal) : getAllChaptersForSubject(CURRENT_CURRICULUM, subjectVal);
     const list = getUniqueChapters(chapters);
     const total = list.length;
     let done = 0;
-
     el("summaryStatusTbody").innerHTML = "";
     updateSummaryProgress(0, total);
     logHead(`🔥 BULK SUMMARY STARTED (${total} chapters)`);
-
     for (const ch of list) {
       const chapter = ch.chapter_title;
       const meta = buildSummaryMeta(classVal, subjectVal, groupVal, chapter);
@@ -475,6 +449,7 @@ export async function runBulkSummaryAutomation() {
     log1("❌ Bulk Error: " + err.message);
   }
 }
+
 document.addEventListener("DOMContentLoaded", () => {
   el("classSelect").addEventListener("change", onClassChange);
   el("subjectSelect").addEventListener("change", onSubjectChange);
